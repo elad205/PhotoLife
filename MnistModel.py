@@ -23,58 +23,37 @@ class NeuralNetwork:
 
         # initialize the weights - 4 layers total
         self.weights = []
-        self.weights.append(torch.randn(784, 2500, device=device, dtype=torch.double, requires_grad=True))
-        self.weights.append(torch.randn(2500, 1000, device=device, dtype=torch.double, requires_grad=True))
-        self.weights.append(torch.randn(1000, 500, device=device, dtype=torch.double, requires_grad=True))
-        self.weights.append(torch.randn(500, 10,  device=device, dtype=torch.double, requires_grad=True))
+        self.weights.append(torch.randn(784, 2500, device=device, dtype=torch
+                                        .double, requires_grad=True))
+        self.weights.append(torch.randn(2500, 1000, device=device, dtype=torch
+                                        .double, requires_grad=True))
+        self.weights.append(torch.randn(1000, 500, device=device, dtype=torch
+                                        .double, requires_grad=True))
+        self.weights.append(torch.randn(500, 10,  device=device, dtype=torch
+                                        .double, requires_grad=True))
 
-        for feature, output_number in zip(input_layer, output_label):
-            # convert the input layer into a pytorch tensor
-            temp = np.array(feature).reshape(-1, 784)
-            temp = temp.astype('float')
-            torch_tensor = torch.from_numpy(temp)
-            torch_tensor = torch_tensor.to(torch.device('cuda'))
-            output_number = np.array([output_number])
-            output_number = output_number.astype('int64')
-            output_number = torch.from_numpy(output_number)
-            output_number = output_number.to(torch.device('cpu'))
-            # create the first layer of the model
-            first_layer = torch_tensor.mm(w1)
-            # perform the activation function on every neuron [relu]
-            first_layer = first_layer.clamp(min=0)
-            # create the seconed layer of the model
-            second_layer = first_layer.mm(w2)
-            second_layer = second_layer.clamp(min=0)
-            third_layer = second_layer.mm(w3)
-            third_layer = third_layer.clamp(min=0)
-            prediction_layer = third_layer.mm(w4)
-            # perform softmax combined with nll loss
-            loss_softmax = torch.nn.CrossEntropyLoss()
-            prediction_layer = prediction_layer.to(torch.device('cpu'))
-            loss = loss_softmax(prediction_layer, output_number)
-            print(loss.item())
-
-            # perform the backpropagation on the network
-            torch.autograd.backward(loss)
-
-            with torch.no_grad():
-                w1 -= self.rate * w1.grad
-                w2 -= self.rate * w2.grad
-                w3 -= self.rate * w3.grad
-                w4 -= self.rate * w4.grad
-
-                # Manually zero the gradients after running the backward pass
-                w1.grad.zero_()
-                w2.grad.zero_()
-                w3.grad.zero_()
-                w4.grad.zero_()
+        for index in range(0, len(input_layer), 100):
+            feature = input_layer[index: index + 100]
+            output_number = output_label[index: index + 100]
+            prediction_layer = self.forward_process(
+                Layer(self.parse_python_input_to_cuda_tensor(feature, 100, 784), 0))
+            loss = self.softmax_loss(prediction_layer.layer,
+                                     self.convert_label(output_number))
+            print(loss)
+            self.back_propagation(loss)
 
     def forward_process(self, layer):
+        """
+        this is the forward iteration of the network
+        :param layer:
+        :return:
+        """
         if layer.index == len(self.weights):
             return layer
         else:
             new_layer = self.create_activated_layer(layer)
-            self.forward_process(new_layer)
+            layer_1 = self.forward_process(new_layer)
+            return layer_1
 
     def create_activated_layer(self, layer):
         """
@@ -106,7 +85,8 @@ class NeuralNetwork:
     @staticmethod
     def softmax_loss(prediction_layer, expected_output):
         loss_softmax = torch.nn.CrossEntropyLoss()
-        # currently does loss calculation in the cpu in order to avoid gradient explosion
+        # currently does loss calculation in the cpu in order to
+        # avoid gradient explosion
         prediction_layer = prediction_layer.to(torch.device('cpu'))
         loss = loss_softmax(prediction_layer, expected_output)
         return loss
@@ -116,16 +96,18 @@ class NeuralNetwork:
         torch.autograd.backward(loss)
 
         with torch.no_grad():
-            w1 -= self.rate * w1.grad
-            w2 -= self.rate * w2.grad
-            w3 -= self.rate * w3.grad
-            w4 -= self.rate * w4.grad
+            for index in range(len(self.weights)):
+                self.weights[index] -= self.rate * self.weights[index].grad
+                self.weights[index].grad.zero_()
 
-            # Manually zero the gradients after running the backward pass
-            w1.grad.zero_()
-            w2.grad.zero_()
-            w3.grad.zero_()
-            w4.grad.zero_()
+    @staticmethod
+    def convert_label(label):
+        output_number = np.array(label)
+        output_number = output_number.astype('int64')
+        output_number = torch.from_numpy(output_number)
+        output_number = output_number.to(torch.device('cpu'))
+        return output_number
+
 
 def main():
     ser = VisdomServer.Server()
