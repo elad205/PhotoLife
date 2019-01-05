@@ -4,43 +4,62 @@ import torch
 import visdom
 import VisdomServer
 import math
-import torchvision
-
-
+import torchvision.datasets.mnist
+import copy
+import random
 class Layer:
     def __init__(self, layer_tensor, layer_number):
         self.layer = layer_tensor
         self.index = layer_number
 
 
-class NeuralNetwork:
-    def __init__(self, input_layer, output_label):
-
+class NeuralNetwork(torch.nn.Module):
+    def __init__(self, train_data, viz_tool):
+        super(NeuralNetwork, self).__init__()
         # using the nvidia cuda api in order to perform calculations on a GPU
         device = torch.device('cuda')
-        self.cost = (0, 0)
-        self.rate = 1e-6
-
+        self.rate = 0.001
+        self.loss_plot = []
+        self.viz = viz_tool
         # initialize the weights - 4 layers total
         self.weights = []
-        self.weights.append(torch.randn(784, 2500, device=device, dtype=torch
-                                        .double, requires_grad=True))
-        self.weights.append(torch.randn(2500, 1000, device=device, dtype=torch
-                                        .double, requires_grad=True))
-        self.weights.append(torch.randn(1000, 500, device=device, dtype=torch
-                                        .double, requires_grad=True))
-        self.weights.append(torch.randn(500, 10,  device=device, dtype=torch
-                                        .double, requires_grad=True))
+        self.bias = []
 
-        for index in range(0, len(input_layer), 100):
-            feature = input_layer[index: index + 100]
-            output_number = output_label[index: index + 100]
-            prediction_layer = self.forward_process(
-                Layer(self.parse_python_input_to_cuda_tensor(feature, 100, 784), 0))
-            loss = self.softmax_loss(prediction_layer.layer,
-                                     self.convert_label(output_number))
+        self.weights.append(torch.randn(2500, 784, device=device, dtype=torch
+                                        .float, requires_grad=True))
+        self.weights.append(torch.randn(1000, 2500, device=device, dtype=torch
+                                        .float, requires_grad=True))
+        self.weights.append(torch.randn(500, 1000, device=device, dtype=torch
+                                        .float, requires_grad=True))
+        self.weights.append(torch.randn(10, 500,  device=device, dtype=torch
+                                        .float, requires_grad=True))
+
+
+        self.init_weights()
+        """
+        stdv = 1. / math.sqrt(self.weights[0].size(0))
+        self.weights[0].data.uniform_(-stdv, stdv)
+        stdv = 1. / math.sqrt(self.weights[1].size(0))
+        self.weights[1].data.uniform_(-stdv, stdv)
+        """
+        for ind in range(150):
+            for i, (images, labels) in enumerate(train_data):
+
+                images = images.reshape(-1, 28 * 28).to(device)
+                prediction_layer = self.forward_process(Layer(images,0))
+                loss = self.softmax_loss(prediction_layer.layer, labels.to(device))
+                self.loss_plot.append(i)
+                self.loss_plot.append(loss.item())
+                self.back_propagation(loss)
             print(loss)
-            self.back_propagation(loss)
+            self.viz.scatter(np.array(self.loss_plot).reshape(int(len(self.loss_plot)/2), 2))
+
+    def forward(self, x):
+        out = x.matmul(self.weights[0].t())
+        out = out.clamp(min=0)
+        out = out.matmul(self.weights[1].t())
+
+        return out
 
     def forward_process(self, layer):
         """
@@ -62,42 +81,29 @@ class NeuralNetwork:
         :return: activated layer
         """
         # create the layer of the model
-        calculated_layer = layer.layer.mm(self.weights[layer.index])
+        calculated_layer = layer.layer.matmul(self.weights[layer.index].t())
         # perform the activation function on every neuron [relu]
-        activated_layer = calculated_layer.clamp(min=0)
-        return Layer(activated_layer, layer.index + 1)
-
-    @staticmethod
-    def parse_python_input_to_cuda_tensor(lst, batch_size, input_size):
-        """
-        this function gets a python list and parses it into a pytorch tensor
-        :param lst:  the python list
-        :param batch_size: the batch size of the input
-        :param input_size: the size of each input
-        :return: parsed pytorch tensor
-        """
-        temp = np.array(lst).reshape(batch_size, input_size)
-        temp = temp.astype('float')
-        torch_tensor = torch.from_numpy(temp)
-        torch_tensor = torch_tensor.to(torch.device('cuda'))
-        return torch_tensor
+        if layer.index < len(self.weights) - 1:
+            activated_layer = calculated_layer.clamp(min=0)
+        else:
+            activated_layer = calculated_layer
+        return Layer(layer_tensor=activated_layer, layer_number=layer.index + 1)
 
     @staticmethod
     def softmax_loss(prediction_layer, expected_output):
         loss_softmax = torch.nn.CrossEntropyLoss()
-        # currently does loss calculation in the cpu in order to
-        # avoid gradient explosion
-        prediction_layer = prediction_layer.to(torch.device('cpu'))
         loss = loss_softmax(prediction_layer, expected_output)
         return loss
 
     def back_propagation(self, loss):
         # perform the backpropagation on the network
-        torch.autograd.backward(loss)
+        loss.backward()
 
         with torch.no_grad():
             for index in range(len(self.weights)):
-                self.weights[index] -= self.rate * self.weights[index].grad
+                self.weights[index] -= self.rate * self.weights[index].grad.data
+
+            for index in range(len(self.weights)):
                 self.weights[index].grad.zero_()
 
     @staticmethod
@@ -105,24 +111,51 @@ class NeuralNetwork:
         output_number = np.array(label)
         output_number = output_number.astype('int64')
         output_number = torch.from_numpy(output_number)
-        output_number = output_number.to(torch.device('cpu'))
+        output_number = output_number.to(torch.device('cuda'))
         return output_number
 
+    def init_weights(self):
+        for index in range(len(self.weights)):
+            torch.nn.init.kaiming_uniform_(self.weights[index], a=math.sqrt(5))
+            self.bias.append(torch.empty(self.weights[index].size(0), requires_grad=True))
+        for index in range(len(self.bias)):
+            bound = 1 / math.sqrt(self.weights[index].size(1))
+            torch.nn.init.uniform_(self.bias[index], -bound, bound)
 
 def main():
-    ser = VisdomServer.Server()
+    #ser = VisdomServer.Server()
     vis = visdom.Visdom()
     vis.text('Hello, world!')
-    data = mnist.MNIST(r"C:\Users\eladc\PycharmProjects\PyTorchEnv\MNIST")
-    images, labels = data.load_training()
-    print(labels[0])
-    # print(np.asarray(images)[0].reshape(28,28))
-    img = np.array(images[0]).astype('uint8').reshape(1, 28, 28)
-    vis.image(img)
-    img = np.array(images[0]).reshape(-1, 784)
-    img = img.astype('float')
-    print(img.dtype)
-    n = NeuralNetwork(images, labels)
+    train = torchvision.datasets.mnist.MNIST(
+        r"..\..\data", train=True, download=True,
+        transform=torchvision.transforms.ToTensor())
+    train_loader = torch.utils.data.DataLoader(dataset=train,
+                                               batch_size=100,
+                                               shuffle=True)
+    test_dataset = torchvision.datasets.MNIST(root='../../data',
+                                              train=False,
+                                              transform=torchvision.transforms.ToTensor(), download=True)
+
+    test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
+                                              batch_size=100,
+                                              shuffle=False)
+
+    n = NeuralNetwork(train_loader, vis)
+    device = torch.device('cuda')
+
+    with torch.no_grad():
+        correct = 0
+        total = 0
+        for images, labels in test_loader:
+            images = images.reshape(-1, 28 * 28).to(device)
+            labels = labels.to(device)
+            outputs = n.forward_process(Layer(images, 0))
+            _, predicted = torch.max(outputs.layer.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+
+        print('Accuracy of the network on the 10000 test images: {} %'.format(
+            100 * correct / total))
 
 
 if __name__ == '__main__':
