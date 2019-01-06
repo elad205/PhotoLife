@@ -27,18 +27,19 @@ class NeuralNetwork(torch.nn.Module):
         # using the nvidia cuda api in order to perform calculations on a GPU
         with torch.no_grad():
             self.device = torch.device('cuda')
-            self.rate = 0.001
+            self.rate = 0.1
             self.loss_plot = []
             self.cost_plot = []
             self.viz = viz_tool
             self.network_layers = layer_number
             self.weights = torch.nn.ModuleList()
         # initiate the weights
-        self.init_weights_linear_profile([(784, 2500), (2500, 1000),
-                                          (1000, 500), (500, 10)])
+        # (784, 2500), (2500, 1000), (1000, 500), (500, 10)
+        self.init_weights_linear_profile([(784, 2500), (2500, 2000),
+                                          (2000, 1500), (1500, 1000), (1000, 500), (500, 10)])
 
         # create an optimizer for the network
-        self.optimizer = torch.optim.SGD(self.parameters(), lr=self.rate)
+        self.optimizer = torch.optim.SGD(self.parameters(), lr=self.rate, momentum=0.8)
 
     def train_model(self, epoches, train_data):
         """
@@ -83,10 +84,10 @@ class NeuralNetwork(torch.nn.Module):
 
     def forward(self, layer):
         """
-               this is the forward iteration of the network
-               :param layer: a layer object
-               :return: the prediction layer
-               """
+        this is the forward iteration of the network
+        :param layer: a layer object
+        :return: the prediction layer
+        """
         if layer.index == len(self.weights):
             return layer
         else:
@@ -183,10 +184,10 @@ def main():
 
 
 def evalute_network(vis, train_loader, test_loader):
-    n = NeuralNetwork(vis, 4)
-    n.train_model(800, train_loader)
+    n = NeuralNetwork(vis, 6)
+    n.train_model(10, train_loader)
     n.test_model(test_loader)
-    torch.save(n.state_dict(), 'n.ckpt')
+    torch.save(n.state_dict(), 'model.ckpt')
 
 
 if __name__ == '__main__':
