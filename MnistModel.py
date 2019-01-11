@@ -5,6 +5,19 @@ import math
 import torchvision.datasets.mnist
 import time
 
+"""
+File Name       :  MnistModel.py
+Author:         :  Elad Cynamon
+Date            :  11.01.2018
+Version         :  1.0 ready
+
+this file is a Neural network model that classifies digits and trains on 
+the mnist dataset. 
+the module used for the network is pytorch.
+the program displays graphs and test data on a visdom server.
+note that in order to run the file you need to open a visdom server. 
+"""
+
 
 class Layer:
     """
@@ -39,9 +52,8 @@ class NeuralNetwork(torch.nn.Module):
             self.accuracy_window = None
 
         # initiate the weights
-        self.init_weights_linear_profile([(784, 2500), (2500, 2000),
-                                          (2000, 1500), (1500, 1000),
-                                          (1000, 500), (500, 10)])
+        self.init_weights_linear_profile([(784, 2500), (2500, 1000),
+                                         (1000, 500), (500, 10)])
 
         # create an optimizer for the network
         self.optimizer = torch.optim.SGD(self.parameters(), lr=self.rate,
@@ -211,11 +223,11 @@ class NeuralNetwork(torch.nn.Module):
                 # calculate right answers
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
-                time.sleep(2)
+                # time.sleep(2)
 
             # print the accuracy
             self.viz.text(100 * correct / total)
-            print("accuracy is" + str(100 * correct / total))
+            print("accuracy is " + str(100 * correct / total))
 
 
 def load_model(path, vis, layers):
@@ -236,9 +248,10 @@ def main():
     vis = visdom.Visdom()
 
     # initialise data set
-    train_loader, eval_loader, test_loader = load_mnist(100)
+    train_loader, eval_loader, test_loader = load_mnist(bath_size=200)
     # create, train and test the network
-    create_new_network(vis, train_loader, test_loader, eval_loader, 6, 5)
+    create_new_network(vis, train_loader, test_loader, eval_loader, layers=4,
+                       epochs=10)
 
 
 def create_new_network(vis, train_loader, test_loader, eval_loader,
