@@ -3,7 +3,7 @@ import torch
 import visdom
 import math
 import torchvision.datasets.mnist
-import copy
+import time
 
 
 class Layer:
@@ -46,15 +46,16 @@ class NeuralNetwork(torch.nn.Module):
         self.optimizer = torch.optim.SGD(self.parameters(), lr=self.rate,
                                          momentum=0.8)
 
-    def train_model(self, epoches, train_data):
+    def train_model(self, epochs, train_data):
         """
-        train the model
-        :param epoches: the number of epoches to perform
-        :param train_data: the dataset
+        trains the model, this function takes the training data and preforms
+        the feed forward, back propagation and the optimisation process
+        :param epochs: the number of epochs to perform
+        :param train_data: the data set
         :return:
         """
         loss = None
-        for epoch in range(epoches):
+        for epoch in range(epochs):
             counter = 0
             correct = 0
             total = 0
@@ -67,6 +68,7 @@ class NeuralNetwork(torch.nn.Module):
                 # calculate the loss
                 loss = self.softmax_loss(prediction_layer.layer,
                                          labels.to(self.device))
+
                 # backpropagate through the network
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -75,8 +77,11 @@ class NeuralNetwork(torch.nn.Module):
                 self.loss_logger.append(loss.item())
                 counter += 1
                 total += labels.size(0)
+
+                # calculate the accuracy
                 _, predicted = torch.max(prediction_layer.layer.data, 1)
                 correct += (predicted == labels.to(self.device)).sum().item()
+
             print("epoch {0} avg loss is {1}".format(
                 epoch, np.mean(self.loss_logger)))
             # create a graph of the loss in perspective to the iterations
@@ -88,24 +93,25 @@ class NeuralNetwork(torch.nn.Module):
             self.cost_logger.append(np.mean(self.loss_logger))
             self.loss_logger = []
             self.accuracy_logger.append(correct / total)
+
         # create a graph of the cost in respect to the epochs
         if self.cost_window is None:
-            self.cost_window = self.viz.line(X=list(range(epoches)),
-                                             Y=self.cost_logger, name='train')
+            self.cost_window = self.viz.line(
+                X=list(range(epochs)), Y=self.cost_logger,
+                name='train', opts=dict(xlabel='epoch', ylabel='cost'))
         else:
             self.viz.line(
-                X=list(range(epoches)), Y=self.cost_logger,
-                win=self.cost_window, update='append', name='eval',
-                opts=dict(xlabel='epoch', ylabel='cost'))
+                X=list(range(epochs)), Y=self.cost_logger,
+                win=self.cost_window, update='append', name='eval')
 
         # create a graph of the accuracy in respect to epochs
         if self.accuracy_window is None:
             self.accuracy_window = self.viz.line(
-                X=list(range(epoches)),
+                X=list(range(epochs)),
                 Y=self.accuracy_logger, name='train',
                 opts=dict(xlabel='epoch', ylabel='accuracy'))
         else:
-            self.viz.line(X=list(range(epoches)),
+            self.viz.line(X=list(range(epochs)),
                           Y=self.accuracy_logger, win=self.accuracy_window,
                           update='append', name='eval')
 
@@ -115,7 +121,8 @@ class NeuralNetwork(torch.nn.Module):
 
     def forward(self, layer):
         """
-        this is the forward iteration of the network
+        this is the forward iteration of the network.
+        this function is recursive and uses the create activated layer function
         :param layer: a layer object
         :return: the prediction layer
         """
@@ -130,7 +137,8 @@ class NeuralNetwork(torch.nn.Module):
         """
         creates activated layer using the relu function
         :param layer: layer objects
-        :return: the next layer of the network
+        :return: the next layer of the network a Layer object with the next
+        index
         """
         # create the layer of the model
         calculated_layer = layer.layer.matmul(
@@ -169,20 +177,44 @@ class NeuralNetwork(torch.nn.Module):
                 sizes[index][0], sizes[index][1]).to(self.device))
 
     def test_model(self, test_data):
+        """
+        this function tests the model, it iterates on the testing data and
+        feeds it to the network without backprop
+        :param test_data: the testing data
+        :return:
+        """
         total = 0
         correct = 0
+        viz_win_text = self.viz.text("")
+        viz_win_images = None
         with torch.no_grad():
             for i, (images, labels) in enumerate(test_data):
+                # display the images
+                if viz_win_images is None:
+                    viz_win_images = self.viz.images(images)
+                else:
+                    self.viz.images(images, win=viz_win_images)
+
+                # parse the images and labels
                 images = images.reshape(-1, 28 * 28).to(self.device)
                 labels = labels.to(self.device)
-
+                # feed forward through the network
                 prediction_layer = self.forward(Layer(images, 0)).layer
+                # check the most likely prediction in the layer
                 _, predicted = torch.max(prediction_layer.data, 1)
 
+                # display the answer
+                data_display = str(predicted.cpu().numpy().tolist())
+                self.viz.text(data_display, win=viz_win_text)
+
+                # calculate right answers
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
+                time.sleep(2)
 
-            print(100 * correct / total)
+            # print the accuracy
+            self.viz.text(100 * correct / total)
+            print("accuracy is" + str(100 * correct / total))
 
 
 def load_model(path, vis, layers=4):
@@ -192,47 +224,57 @@ def load_model(path, vis, layers=4):
 
 
 def main():
+    # connect to the visdom server
     vis = visdom.Visdom()
-    train = torchvision.datasets.mnist.MNIST(
-        r"..\..\data", train=True, download=True,
-        transform=torchvision.transforms.ToTensor())
 
-    # split the data to train data and validation data
-    # train is 80% of train data and validation is 20% of the train data
-    total_train = int(len(train) * 0.8)
-    sampler = list(range(len(train)))
-    train_data = sampler[0: total_train]
-    eval_data = sampler[total_train:]
-
-    # create a random sample for each data set
-    train_data = torch.utils.data.sampler.SubsetRandomSampler(train_data)
-    eval_data = torch.utils.data.sampler.SubsetRandomSampler(eval_data)
-
-    train_loader = torch.utils.data.DataLoader(dataset=train,
-                                               batch_size=100,
-                                               sampler=train_data)
-
-    eval_loader = torch.utils.data.DataLoader(
-        dataset=train, batch_size=100, sampler=eval_data)
-
-    test_dataset = torchvision.datasets.MNIST(root=r'..\..\data',
-                                              train=False,
-                                              transform=torchvision.transforms.
-                                              ToTensor())
-
-    test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
-                                              batch_size=1,
-                                              shuffle=False)
-
+    # initialise data set
+    train_loader, eval_loader, test_loader = load_mnist(100)
+    # create, train and test the network
     create_new_network(vis, train_loader, test_loader, eval_loader)
 
 
 def create_new_network(vis, train_loader, test_loader, eval_loader):
-    n = NeuralNetwork(vis, 6)
-    n.train_model(20, train_loader)
-    n.train_model(20, eval_loader)
-    n.test_model(test_loader)
-    torch.save(n.state_dict(), 'model.ckpt')
+    model = NeuralNetwork(vis, 6)
+    model.train_model(5, train_loader)
+    model.train_model(5, eval_loader)
+    model.test_model(test_loader)
+    torch.save(model.state_dict(), 'model.ckpt')
+
+
+def load_mnist(bath_size, train_size=0.8):
+    # load mnist data set
+    train = torchvision.datasets.mnist.MNIST(
+        "data", train=True, download=True,
+        transform=torchvision.transforms.ToTensor())
+
+    # split the data to train data and validation data
+    # train is 80% of train data and validation is 20% of the train data
+    total_train = int(len(train) * train_size)
+    sampler = list(range(len(train)))
+    train_data = sampler[0: total_train]
+    eval_data = sampler[total_train:]
+    # create a random sample for each data set
+    train_data = torch.utils.data.sampler.SubsetRandomSampler(train_data)
+    eval_data = torch.utils.data.sampler.SubsetRandomSampler(eval_data)
+
+    # load training data
+    train_loader = torch.utils.data.DataLoader(dataset=train,
+                                               batch_size=bath_size,
+                                               sampler=train_data)
+    # load eval data
+    eval_loader = torch.utils.data.DataLoader(
+        dataset=train, batch_size=bath_size, sampler=eval_data)
+
+    test_dataset = torchvision.datasets.MNIST(root='data',
+                                              train=False,
+                                              transform=torchvision.transforms.
+                                              ToTensor())
+    # load test data
+    test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
+                                              batch_size=bath_size,
+                                              shuffle=False)
+
+    return train_loader, eval_loader, test_loader
 
 
 if __name__ == '__main__':
