@@ -34,6 +34,8 @@ class NeuralNetwork(torch.nn.Module):
             self.viz = viz_tool
             self.network_layers = layer_number
             self.weights = torch.nn.ModuleList()
+            self.cost_window = None
+            self.accuracy_window = None
         # initiate the weights
         # (784, 2500), (2500, 1000), (1000, 500), (500, 10)
         self.init_weights_linear_profile([(784, 2500), (2500, 2000),
@@ -79,17 +81,35 @@ class NeuralNetwork(torch.nn.Module):
                 epoch, np.mean(self.loss_logger)))
             # create a graph of the loss in perspective to the iterations
             if epoch == 0:
-                self.viz.scatter(np.column_stack((list(range(counter)),
-                                                  self.loss_logger)))
+                self.viz.line(X=list(range(counter)), Y=self.loss_logger)
+
             # zero the data
             # every epoch calculate the average loss
             self.cost_logger.append(np.mean(self.loss_logger))
             self.loss_logger = []
             self.accuracy_logger.append(correct / total)
         # create a graph of the cost in respect to the epochs
-        self.viz.scatter(
-            np.column_stack((list(range(epoches)), self.cost_logger)))
-        self.viz.line(X=list(range(epoches)), Y=self.accuracy_logger)
+        if self.cost_window is None:
+            self.cost_window = self.viz.line(X=list(range(epoches)),
+                                             Y=self.cost_logger, name='train')
+        else:
+            self.viz.line(
+                X=list(range(epoches)), Y=self.cost_logger,
+                win=self.cost_window, update='append', name='eval',
+                opts=dict(xlabel='epoch', ylabel='cost'))
+
+        # create a graph of the accuracy in respect to epochs
+        if self.accuracy_window is None:
+            self.accuracy_window = self.viz.line(
+                X=list(range(epoches)),
+                Y=self.accuracy_logger, name='train',
+                opts=dict(xlabel='epoch', ylabel='accuracy'))
+        else:
+            self.viz.line(X=list(range(epoches)),
+                          Y=self.accuracy_logger, win=self.accuracy_window,
+                          update='append', name='eval')
+
+        # zero the loggers
         self.cost_logger = []
         self.accuracy_logger = []
 
@@ -209,8 +229,8 @@ def main():
 
 def create_new_network(vis, train_loader, test_loader, eval_loader):
     n = NeuralNetwork(vis, 6)
-    n.train_model(10, train_loader)
-    n.train_model(10, eval_loader)
+    n.train_model(20, train_loader)
+    n.train_model(20, eval_loader)
     n.test_model(test_loader)
     torch.save(n.state_dict(), 'model.ckpt')
 
