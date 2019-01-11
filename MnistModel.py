@@ -28,18 +28,21 @@ class NeuralNetwork(torch.nn.Module):
         with torch.no_grad():
             self.device = torch.device('cuda')
             self.rate = 0.1
-            self.loss_plot = []
-            self.cost_plot = []
+            self.loss_logger = []
+            self.cost_logger = []
+            self.accuracy_logger = []
             self.viz = viz_tool
             self.network_layers = layer_number
             self.weights = torch.nn.ModuleList()
         # initiate the weights
         # (784, 2500), (2500, 1000), (1000, 500), (500, 10)
         self.init_weights_linear_profile([(784, 2500), (2500, 2000),
-                                          (2000, 1500), (1500, 1000), (1000, 500), (500, 10)])
+                                          (2000, 1500), (1500, 1000),
+                                          (1000, 500), (500, 10)])
 
         # create an optimizer for the network
-        self.optimizer = torch.optim.SGD(self.parameters(), lr=self.rate, momentum=0.8)
+        self.optimizer = torch.optim.SGD(self.parameters(), lr=self.rate,
+                                         momentum=0.8)
 
     def train_model(self, epoches, train_data):
         """
@@ -50,6 +53,9 @@ class NeuralNetwork(torch.nn.Module):
         """
         loss = None
         for epoch in range(epoches):
+            counter = 0
+            correct = 0
+            total = 0
             # run on all the data examples parsed by pytorch vision
             for i, (images, labels) in enumerate(train_data):
                 # flatten the image to 1d tensor
@@ -64,23 +70,28 @@ class NeuralNetwork(torch.nn.Module):
                 loss.backward()
                 self.optimizer.step()
                 # save data for plots
-                self.loss_plot.append(i)
-                self.loss_plot.append(loss.item())
-            print(loss)
+                self.loss_logger.append(loss.item())
+                counter += 1
+                total += labels.size(0)
+                _, predicted = torch.max(prediction_layer.layer.data, 1)
+                correct += (predicted == labels.to(self.device)).sum().item()
+            print("epoch {0} avg loss is {1}".format(
+                epoch, np.mean(self.loss_logger)))
             # create a graph of the loss in perspective to the iterations
-            graph = np.array(self.loss_plot).\
-                reshape(int(len(self.loss_plot)/2), 2)
-            if epoch == 1:
-                self.viz.scatter(graph)
+            if epoch == 0:
+                self.viz.scatter(np.column_stack((list(range(counter)),
+                                                  self.loss_logger)))
             # zero the data
-            self.loss_plot = []
-            # every epoch calculate the averge loss
-            self.cost_plot.append(epoch)
-            self.cost_plot.append(np.mean(graph[1]))
-        # create a graph of the cost in respect to the ephoces
-        graph = np.array(self.cost_plot).reshape(
-            int(len(self.cost_plot) / 2), 2)
-        self.viz.scatter(graph)
+            # every epoch calculate the average loss
+            self.cost_logger.append(np.mean(self.loss_logger))
+            self.loss_logger = []
+            self.accuracy_logger.append(correct / total)
+        # create a graph of the cost in respect to the epochs
+        self.viz.scatter(
+            np.column_stack((list(range(epoches)), self.cost_logger)))
+        self.viz.line(X=list(range(epoches)), Y=self.accuracy_logger)
+        self.cost_logger = []
+        self.accuracy_logger = []
 
     def forward(self, layer):
         """
@@ -140,26 +151,23 @@ class NeuralNetwork(torch.nn.Module):
     def test_model(self, test_data):
         total = 0
         correct = 0
-        cost = []
         with torch.no_grad():
             for i, (images, labels) in enumerate(test_data):
                 images = images.reshape(-1, 28 * 28).to(self.device)
+                labels = labels.to(self.device)
+
                 prediction_layer = self.forward(Layer(images, 0)).layer
                 _, predicted = torch.max(prediction_layer.data, 1)
-                labels = labels.to(torch.device('cuda'))
+
                 total += labels.size(0)
-                cost.append(i)
-                cost.append(self.softmax_loss(prediction_layer, labels).item())
                 correct += (predicted == labels).sum().item()
-            graph = np.array(cost).reshape(int(len(cost) / 2), 2)
-            self.viz.scatter(graph)
-            print(correct / 100)
+
+            print(100 * correct / total)
 
 
 def load_model(path, vis, layers=4):
     model = NeuralNetwork(vis, layers)
     model.load_state_dict(torch.load(path))
-    model.eval()
     return model
 
 
@@ -168,9 +176,25 @@ def main():
     train = torchvision.datasets.mnist.MNIST(
         r"..\..\data", train=True, download=True,
         transform=torchvision.transforms.ToTensor())
+
+    # split the data to train data and validation data
+    # train is 80% of train data and validation is 20% of the train data
+    total_train = int(len(train) * 0.8)
+    sampler = list(range(len(train)))
+    train_data = sampler[0: total_train]
+    eval_data = sampler[total_train:]
+
+    # create a random sample for each data set
+    train_data = torch.utils.data.sampler.SubsetRandomSampler(train_data)
+    eval_data = torch.utils.data.sampler.SubsetRandomSampler(eval_data)
+
     train_loader = torch.utils.data.DataLoader(dataset=train,
                                                batch_size=100,
-                                               shuffle=True)
+                                               sampler=train_data)
+
+    eval_loader = torch.utils.data.DataLoader(
+        dataset=train, batch_size=100, sampler=eval_data)
+
     test_dataset = torchvision.datasets.MNIST(root=r'..\..\data',
                                               train=False,
                                               transform=torchvision.transforms.
@@ -180,12 +204,13 @@ def main():
                                               batch_size=1,
                                               shuffle=False)
 
-    evalute_network(vis, train_loader, test_loader)
+    create_new_network(vis, train_loader, test_loader, eval_loader)
 
 
-def evalute_network(vis, train_loader, test_loader):
+def create_new_network(vis, train_loader, test_loader, eval_loader):
     n = NeuralNetwork(vis, 6)
     n.train_model(10, train_loader)
+    n.train_model(10, eval_loader)
     n.test_model(test_loader)
     torch.save(n.state_dict(), 'model.ckpt')
 
