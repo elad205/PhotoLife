@@ -24,9 +24,10 @@ class NeuralNetwork(torch.nn.Module):
         :param layer_number: the number of layers in the network
         """
         super(NeuralNetwork, self).__init__()
-        # using the nvidia cuda api in order to perform calculations on a GPU
+        # using the nvidia CUDA api in order to perform calculations on a GPU
         with torch.no_grad():
-            self.device = torch.device('cuda')
+            self.device = torch.device('cuda' if torch.cuda.is_available()
+                                       else 'cpu')
             self.rate = 0.1
             self.loss_logger = []
             self.cost_logger = []
@@ -36,8 +37,8 @@ class NeuralNetwork(torch.nn.Module):
             self.weights = torch.nn.ModuleList()
             self.cost_window = None
             self.accuracy_window = None
+
         # initiate the weights
-        # (784, 2500), (2500, 1000), (1000, 500), (500, 10)
         self.init_weights_linear_profile([(784, 2500), (2500, 2000),
                                           (2000, 1500), (1500, 1000),
                                           (1000, 500), (500, 10)])
@@ -217,7 +218,14 @@ class NeuralNetwork(torch.nn.Module):
             print("accuracy is" + str(100 * correct / total))
 
 
-def load_model(path, vis, layers=4):
+def load_model(path, vis, layers):
+    """
+    loads the model from .ckpt file
+    :param path: the path of the file
+    :param vis: vis object to display data
+    :param layers: the number of layers of the network
+    :return: loaded model
+    """
     model = NeuralNetwork(vis, layers)
     model.load_state_dict(torch.load(path))
     return model
@@ -230,18 +238,40 @@ def main():
     # initialise data set
     train_loader, eval_loader, test_loader = load_mnist(100)
     # create, train and test the network
-    create_new_network(vis, train_loader, test_loader, eval_loader)
+    create_new_network(vis, train_loader, test_loader, eval_loader, 6, 5)
 
 
-def create_new_network(vis, train_loader, test_loader, eval_loader):
-    model = NeuralNetwork(vis, 6)
-    model.train_model(5, train_loader)
-    model.train_model(5, eval_loader)
+def create_new_network(vis, train_loader, test_loader, eval_loader,
+                       layers, epochs):
+    """
+    this function initialise the network, trains it on the train data and
+    the evaluation data, tests it on the test data and saves the weights.
+    :param vis: the visdom server to display graphs
+    :param train_loader: the training data
+    :param test_loader: the testing data
+    :param eval_loader: the evaluation data
+    :param layers: the number of layers in the model
+    :param epochs: the number epochs to perform
+    :return: the model created
+    """
+    model = NeuralNetwork(vis, layers)
+    model.train_model(epochs, train_loader)
+    model.train_model(epochs, eval_loader)
     model.test_model(test_loader)
     torch.save(model.state_dict(), 'model.ckpt')
+    return model
 
 
 def load_mnist(bath_size, train_size=0.8):
+    """
+    this function loads the mnist data set to the script.
+    it splits the training data into train data and evaluation data
+    by the ratio determined by train size, default is 80% - 20%.
+    :param bath_size: the batch size of the data
+    :param train_size: the size of the train data in relative to the entire
+    train data
+    :return: a train loader object, an eval loader and a test loader.
+    """
     # load mnist data set
     train = torchvision.datasets.mnist.MNIST(
         "data", train=True, download=True,
