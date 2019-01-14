@@ -41,7 +41,7 @@ class NeuralNetwork(torch.nn.Module):
         with torch.no_grad():
             self.device = torch.device('cuda' if torch.cuda.is_available()
                                        else 'cpu')
-            self.rate = 0.1
+            self.rate = 0.0001
             self.loss_logger = []
             self.cost_logger = []
             self.accuracy_logger = []
@@ -53,11 +53,10 @@ class NeuralNetwork(torch.nn.Module):
 
         # initiate the weights
         self.init_weights_linear_profile([(784, 2500), (2500, 1000),
-                                         (1000, 500), (500, 10)])
+                                         (1000, 500)])
 
         # create an optimizer for the network
-        self.optimizer = torch.optim.SGD(self.parameters(), lr=self.rate,
-                                         momentum=0.8)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=self.rate)
 
     def train_model(self, epochs, train_data):
         """
@@ -154,9 +153,7 @@ class NeuralNetwork(torch.nn.Module):
         index
         """
         # create the layer of the model
-        calculated_layer = layer.layer.matmul(
-            self.weights[layer.index].weight.t()) + self.weights[layer.index].\
-            bias
+        calculated_layer = self.weights[layer.index](layer.layer)
         # perform the activation function on every neuron [relu]
         # don't activate the prediction layer
         if layer.index < len(self.weights) - 1:
@@ -188,6 +185,15 @@ class NeuralNetwork(torch.nn.Module):
         for index in range(self.network_layers):
             self.weights.append(torch.nn.Linear(
                 sizes[index][0], sizes[index][1]).to(self.device))
+
+    def init_weights_liniar_conv(self, sizes):
+
+        for index in range(self.network_layers):
+            if type(sizes[index]) is tuple:
+                self.weights.append(torch.nn.Linear(
+                    sizes[index][0], sizes[index][1]).to(self.device))
+
+        self.weights.append(torch.nn.Conv1d(500, 10, 3).to(self.device))
 
     def test_model(self, test_data):
         """
@@ -248,10 +254,10 @@ def main():
     vis = visdom.Visdom()
 
     # initialise data set
-    train_loader, eval_loader, test_loader = load_mnist(bath_size=200)
+    train_loader, eval_loader, test_loader = load_mnist(bath_size=100)
     # create, train and test the network
-    create_new_network(vis, train_loader, test_loader, eval_loader, layers=4,
-                       epochs=10)
+    create_new_network(vis, train_loader, test_loader, eval_loader, layers=3,
+                       epochs=20)
 
 
 def create_new_network(vis, train_loader, test_loader, eval_loader,
