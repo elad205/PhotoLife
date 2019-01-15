@@ -24,9 +24,14 @@ class Layer:
     this class represents a layer in the network, it contains the
     layer tensor and the place of the layer in the network
     """
-    def __init__(self, layer_tensor, layer_number):
+    def __init__(self, layer_tensor, layer_number, net):
         self.layer = layer_tensor
         self.index = layer_number
+        try:
+            if type(net.weights[self.index]) is torch.nn.Linear and type(net.weights[self.index -1]) is torch.nn.Conv2d:
+                self.layer = self.layer.view(-1, 800)
+        except IndexError:
+            pass
 
 
 class NeuralNetwork(torch.nn.Module):
@@ -50,10 +55,8 @@ class NeuralNetwork(torch.nn.Module):
             self.weights = torch.nn.ModuleList()
             self.cost_window = None
             self.accuracy_window = None
-
         # initiate the weights
-        self.init_weights_linear_profile([(784, 2500), (2500, 1000),
-                                         (1000, 500)])
+        self.init_weights_liniar_conv([('conv', 1, 20, 5), ('conv', 20, 50, 5), ('lin', 800, 500), ('lin', 500, 10)])
 
         # create an optimizer for the network
         self.optimizer = torch.optim.Adam(self.parameters(), lr=self.rate)
@@ -74,9 +77,9 @@ class NeuralNetwork(torch.nn.Module):
             # run on all the data examples parsed by pytorch vision
             for i, (images, labels) in enumerate(train_data):
                 # flatten the image to 1d tensor
-                images = images.reshape(-1, 28 * 28).to(self.device)
+                # images = images.reshape(-1, 28 * 28).to(self.device)
                 # feed forward through the network
-                prediction_layer = self.forward(Layer(images, 0))
+                prediction_layer = self.forward(Layer(images, 0, net=self))
                 # calculate the loss
                 loss = self.softmax_loss(prediction_layer.layer,
                                          labels.to(self.device))
@@ -158,10 +161,12 @@ class NeuralNetwork(torch.nn.Module):
         # don't activate the prediction layer
         if layer.index < len(self.weights) - 1:
             activated_layer = calculated_layer.clamp(min=0)
+            if type(self.weights[layer.index]) is torch.nn.Conv2d:
+                activated_layer = torch.nn.functional.max_pool2d(activated_layer, 2, 2)
         else:
             activated_layer = calculated_layer
         return Layer(layer_tensor=activated_layer,
-                     layer_number=layer.index + 1)
+                     layer_number=layer.index + 1, net=self)
 
     @staticmethod
     def softmax_loss(prediction_layer, expected_output):
@@ -187,13 +192,14 @@ class NeuralNetwork(torch.nn.Module):
                 sizes[index][0], sizes[index][1]).to(self.device))
 
     def init_weights_liniar_conv(self, sizes):
-
         for index in range(self.network_layers):
-            if type(sizes[index]) is tuple:
+            if sizes[index][0] == 'lin':
                 self.weights.append(torch.nn.Linear(
-                    sizes[index][0], sizes[index][1]).to(self.device))
+                    sizes[index][1], sizes[index][2]).to(self.device))
 
-        self.weights.append(torch.nn.Conv1d(500, 10, 3).to(self.device))
+            if sizes[index][0] == 'conv':
+                self.weights.append(torch.nn.Conv2d(sizes[index][1], sizes[index][2], sizes[index][3]))
+
 
     def test_model(self, test_data):
         """
@@ -215,10 +221,11 @@ class NeuralNetwork(torch.nn.Module):
                     self.viz.images(images, win=viz_win_images)
 
                 # parse the images and labels
-                images = images.reshape(-1, 28 * 28).to(self.device)
+                #images = images.reshape(-1, 28 * 28).to(self.device)
+                images = images.to(self.device)
                 labels = labels.to(self.device)
                 # feed forward through the network
-                prediction_layer = self.forward(Layer(images, 0)).layer
+                prediction_layer = self.forward(Layer(images, 0, net=self)).layer
                 # check the most likely prediction in the layer
                 _, predicted = torch.max(prediction_layer.data, 1)
 
@@ -256,8 +263,8 @@ def main():
     # initialise data set
     train_loader, eval_loader, test_loader = load_mnist(bath_size=100)
     # create, train and test the network
-    create_new_network(vis, train_loader, test_loader, eval_loader, layers=3,
-                       epochs=20)
+    create_new_network(vis, train_loader, test_loader, eval_loader, layers=4,
+                       epochs=10)
 
 
 def create_new_network(vis, train_loader, test_loader, eval_loader,
