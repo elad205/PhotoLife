@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 import visdom
-import math
 import torchvision.datasets.mnist
 import time
 
@@ -30,7 +29,8 @@ class Layer:
         try:
             if type(net.weights[self.index]) is torch.nn.Linear and type(
                     net.weights[self.index - 1]) is torch.nn.Conv2d:
-                self.layer = self.layer.view(-1, 800)
+                self.layer = self.layer.view(-1, net.weights[self.index].
+                                             in_features)
         except IndexError:
             pass
 
@@ -48,9 +48,9 @@ class NeuralNetwork(torch.nn.Module):
             self.device = torch.device('cuda' if torch.cuda.is_available()
                                        else 'cpu')
             self.rate = 0.1
-            self.loss_logger = []
-            self.cost_logger = []
-            self.accuracy_logger = []
+            self.loss_logger = ([], [])
+            self.cost_logger = ([], [])
+            self.accuracy_logger = ([], [])
             self.viz = viz_tool
             self.network_layers = layer_number
             self.weights = torch.nn.ModuleList()
@@ -166,7 +166,8 @@ class NeuralNetwork(torch.nn.Module):
         if layer.index < len(self.weights) - 1:
             activated_layer = calculated_layer.clamp(min=0)
             if type(self.weights[layer.index]) is torch.nn.Conv2d:
-                activated_layer = torch.nn.functional.max_pool2d(activated_layer, 2, 2)
+                activated_layer = torch.nn.functional.max_pool2d(
+                    activated_layer, 2, 2)
         else:
             activated_layer = calculated_layer
         return Layer(layer_tensor=activated_layer,
@@ -184,16 +185,6 @@ class NeuralNetwork(torch.nn.Module):
         loss_softmax = torch.nn.CrossEntropyLoss()
         loss = loss_softmax(prediction_layer, expected_output)
         return loss
-
-    def init_weights_linear_profile(self, sizes):
-        """
-        this profile creates the weights of the network
-        :param sizes: the size of the network
-        :return:
-        """
-        for index in range(self.network_layers):
-            self.weights.append(torch.nn.Linear(
-                sizes[index][0], sizes[index][1]).to(self.device))
 
     def init_weights_liniar_conv(self, sizes):
         for index in range(self.network_layers):
