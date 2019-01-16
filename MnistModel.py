@@ -18,6 +18,41 @@ note that in order to run the file you need to open a visdom server.
 """
 
 
+class InvalidLengthException(Exception):
+
+    def __init__(self):
+        msg = "number of loggers have to be same length as log_names"
+        super(InvalidLengthException, self).__init__(msg)
+
+
+class Logger:
+
+    SUPPORTED_TYPES = ['d', 'n']
+
+    def __init__(self, loggers):
+        self.parse_loggers(loggers)
+        self.loggers = {}
+        for item in loggers:
+            if item[0] == 'd':
+                self.loggers[item[1]] = [[], []]
+            else:
+                self.loggers[item[1]] = []
+
+    def parse_loggers(self, loggers):
+        for item in loggers:
+            if item[0] not in Logger.SUPPORTED_TYPES:
+                raise  InvalidLengthException
+
+
+    def create_plot(self, x_axis, labels):
+        self.viz.line(
+            X=list(range(x_axis)), Y=self.perm_logger,
+            name=self.name, opts=dict(xlabel=labels[0], ylabel=labels[1]))
+
+    def set_window(self, window):
+        self.window = window
+
+
 class Layer:
     """
     this class represents a layer in the network, it contains the
@@ -48,8 +83,7 @@ class NeuralNetwork(torch.nn.Module):
             self.device = torch.device('cuda' if torch.cuda.is_available()
                                        else 'cpu')
             self.rate = 0.1
-            self.loss_logger = ([], [])
-            self.cost_logger = ([], [])
+            self.train_logger = Logger(self.viz, "train")
             self.accuracy_logger = ([], [])
             self.viz = viz_tool
             self.network_layers = layer_number
