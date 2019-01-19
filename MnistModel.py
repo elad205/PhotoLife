@@ -18,39 +18,24 @@ note that in order to run the file you need to open a visdom server.
 """
 
 
-class InvalidLengthException(Exception):
+class Plot:
+    def __init__(self, name_x, name_y, viz):
+        self.x_title = name_x
+        self.y_title = name_y
+        self.viz = viz
+        self.window = None
 
-    def __init__(self):
-        msg = "number of loggers have to be same length as log_names"
-        super(InvalidLengthException, self).__init__(msg)
-
-
-class Logger:
-
-    SUPPORTED_TYPES = ['d', 'n']
-
-    def __init__(self, loggers):
-        self.parse_loggers(loggers)
-        self.loggers = {}
-        for item in loggers:
-            if item[0] == 'd':
-                self.loggers[item[1]] = [[], []]
-            else:
-                self.loggers[item[1]] = []
-
-    def parse_loggers(self, loggers):
-        for item in loggers:
-            if item[0] not in Logger.SUPPORTED_TYPES:
-                raise  InvalidLengthException
-
-
-    def create_plot(self, x_axis, labels):
-        self.viz.line(
-            X=list(range(x_axis)), Y=self.perm_logger,
-            name=self.name, opts=dict(xlabel=labels[0], ylabel=labels[1]))
-
-    def set_window(self, window):
-        self.window = window
+    def draw_plot(self, dict_vals, name, up='insert'):
+        if self.window is None:
+            window = self.viz.line(
+                X=dict_vals[self.x_title], Y=dict_vals[self.y_title],
+                name=name, opts=dict(xlabel=self.x_title, ylabel=self.y_title))
+            self.window = window
+        else:
+            self.viz.line(X=dict_vals[self.x_title], Y=dict_vals[self.y_title],
+                          name=name, win=self.window,
+                          update=up, opts=dict(
+                    xlabel=self.x_title, ylabel=self.y_title))
 
 
 class Layer:
@@ -83,13 +68,16 @@ class NeuralNetwork(torch.nn.Module):
             self.device = torch.device('cuda' if torch.cuda.is_available()
                                        else 'cpu')
             self.rate = 0.1
-            self.train_logger = Logger(self.viz, "train")
-            self.accuracy_logger = ([], [])
+            self.train_logger = {"loss": [], "cost": [], "accuracy": [],
+                                 "epochs": []}
+
+            self.test_logger = {"loss": [], "accuracy": [], "epochs": [],
+                                "cost": []}
+
             self.viz = viz_tool
             self.network_layers = layer_number
             self.weights = torch.nn.ModuleList()
-            self.cost_window = None
-            self.accuracy_window = None
+
         # initiate the weights
         self.init_weights_liniar_conv([('conv', 1, 20, 5), ('conv', 20, 50, 5),
                                        ('lin', 800, 500), ('lin', 500, 10)])
@@ -98,7 +86,10 @@ class NeuralNetwork(torch.nn.Module):
         self.optimizer = torch.optim.SGD(self.parameters(), lr=self.rate,
                                          momentum=0.8)
 
-    def train_model(self, epochs, train_data):
+        self.cost_plot = Plot("epochs", "cost", self.viz)
+        self.accuracy_plot = Plot("epochs", "accuracy",  self.viz)
+
+    def train_model(self, epochs, train_data, test_data=None):
         """
         trains the model, this function takes the training data and preforms
         the feed forward, back propagation and the optimisation process
@@ -108,7 +99,6 @@ class NeuralNetwork(torch.nn.Module):
         """
         loss = None
         for epoch in range(epochs):
-            counter = 0
             correct = 0
             total = 0
             # run on all the data examples parsed by pytorch vision
@@ -117,18 +107,17 @@ class NeuralNetwork(torch.nn.Module):
                 # images = images.reshape(-1, 28 * 28).to(self.device)
                 # feed forward through the network
                 images = images.to(self.device)
+                labels = labels.to(self.device)
                 prediction_layer = self.forward(Layer(images, 0, net=self))
                 # calculate the loss
-                loss = self.softmax_loss(prediction_layer.layer,
-                                         labels.to(self.device))
+                loss = self.softmax_loss(prediction_layer.layer, labels)
 
                 # backpropagate through the network
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
                 # save data for plots
-                self.loss_logger.append(loss.item())
-                counter += 1
+                self.train_logger["loss"].append(loss.item())
                 total += labels.size(0)
 
                 # calculate the accuracy
@@ -136,41 +125,32 @@ class NeuralNetwork(torch.nn.Module):
                 correct += (predicted == labels.to(self.device)).sum().item()
 
             print("epoch {0} avg loss is {1}".format(
-                epoch, np.mean(self.loss_logger)))
-            # create a graph of the loss in perspective to the iterations
-            if epoch == 0:
-                self.viz.line(X=list(range(counter)), Y=self.loss_logger)
+                epoch, np.mean(self.train_logger["loss"])))
 
-            # zero the data
             # every epoch calculate the average loss
-            self.cost_logger.append(np.mean(self.loss_logger))
-            self.loss_logger = []
-            self.accuracy_logger.append(correct / total)
+            self.train_logger["cost"].append(np.mean(
+                self.train_logger["loss"]))
+            # zero out the losss
+            self.train_logger["loss"] = []
+            # add accuracy
+            self.train_logger["accuracy"].append(correct / total)
 
+            if test_data is not None:
+                self.test_model(test_data)
+        # add the number of epochs that were done
+        self.train_logger["epochs"] = list(range(epochs))
+        self.test_logger["epochs"] = list(range(epochs))
         # create a graph of the cost in respect to the epochs
-        if self.cost_window is None:
-            self.cost_window = self.viz.line(
-                X=list(range(epochs)), Y=self.cost_logger,
-                name='train', opts=dict(xlabel='epoch', ylabel='cost'))
-        else:
-            self.viz.line(
-                X=list(range(epochs)), Y=self.cost_logger,
-                win=self.cost_window, update='append', name='eval')
-
+        self.cost_plot.draw_plot(self.train_logger, "train")
+        self.cost_plot.draw_plot(self.test_logger, "test", up="append")
         # create a graph of the accuracy in respect to epochs
-        if self.accuracy_window is None:
-            self.accuracy_window = self.viz.line(
-                X=list(range(epochs)),
-                Y=self.accuracy_logger, name='train',
-                opts=dict(xlabel='epoch', ylabel='accuracy'))
-        else:
-            self.viz.line(X=list(range(epochs)),
-                          Y=self.accuracy_logger, win=self.accuracy_window,
-                          update='append', name='eval')
-
+        self.accuracy_plot.draw_plot(self.train_logger, "train")
+        self.accuracy_plot.draw_plot(self.test_logger, "test", up="append")
         # zero the loggers
-        self.cost_logger = []
-        self.accuracy_logger = []
+        self.train_logger["cost"] = []
+        self.train_logger["accuracy"] = []
+        self.test_logger["cost"] = []
+        self.test_logger["accuracy"] = []
 
     def forward(self, layer):
         """
@@ -231,24 +211,29 @@ class NeuralNetwork(torch.nn.Module):
                     sizes[index][1], sizes[index][2],
                     sizes[index][3]).to(self.device))
 
-    def test_model(self, test_data):
+    def test_model(self, test_data, display_data=False):
         """
         this function tests the model, it iterates on the testing data and
         feeds it to the network without backprop
         :param test_data: the testing data
+        :param display_data: wether or not the data will be displayed
+        on the visdom server
         :return:
         """
         total = 0
         correct = 0
-        viz_win_text = self.viz.text("")
+        viz_win_text = None
         viz_win_images = None
+        if display_data:
+            viz_win_text = self.viz.text("")
         with torch.no_grad():
             for i, (images, labels) in enumerate(test_data):
                 # display the images
-                if viz_win_images is None:
-                    viz_win_images = self.viz.images(images)
-                else:
-                    self.viz.images(images, win=viz_win_images)
+                if display_data:
+                    if viz_win_images is None:
+                        viz_win_images = self.viz.images(images)
+                    else:
+                        self.viz.images(images, win=viz_win_images)
 
                 # parse the images and labels
                 # images = images.reshape(-1, 28 * 28).to(self.device)
@@ -261,17 +246,24 @@ class NeuralNetwork(torch.nn.Module):
                 _, predicted = torch.max(prediction_layer.data, 1)
 
                 # display the answer
-                data_display = str(predicted.cpu().numpy().tolist())
-                self.viz.text(data_display, win=viz_win_text)
+                if display_data:
+                    data_display = str(predicted.cpu().numpy().tolist())
+                    self.viz.text(data_display, win=viz_win_text)
 
                 # calculate right answers
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
                 # time.sleep(2)
-
+                self.test_logger["loss"].append(self.softmax_loss(
+                    prediction_layer, labels).item())
             # print the accuracy
-            self.viz.text(100 * correct / total)
-            print("accuracy is " + str(100 * correct / total))
+            if display_data:
+                self.viz.text(100 * correct / total)
+                print("accuracy is " + str(100 * correct / total))
+
+            self.test_logger["cost"].append(np.mean(self.test_logger["loss"]))
+            self.test_logger["loss"] = []
+            self.test_logger["accuracy"].append(correct / total)
 
 
 def load_model(path, vis, layers):
@@ -295,7 +287,7 @@ def main():
     train_loader, eval_loader, test_loader = load_mnist(bath_size=100)
     # create, train and test the network
     create_new_network(vis, train_loader, test_loader, eval_loader, layers=4,
-                       epochs=30)
+                       epochs=10)
 
 
 def create_new_network(vis, train_loader, test_loader, eval_loader,
@@ -312,14 +304,15 @@ def create_new_network(vis, train_loader, test_loader, eval_loader,
     :return: the model created
     """
     model = NeuralNetwork(vis, layers)
-    model.train_model(epochs, train_loader)
-    model.train_model(epochs, eval_loader)
-    model.test_model(test_loader)
+    model.train_model(epochs, train_loader, test_loader)
+    # TODO: fix eval graph display
+    #model.train_model(epochs, eval_loader, test_loader)
+    model.test_model(test_loader, display_data=True)
     torch.save(model.state_dict(), 'model.ckpt')
     return model
 
 
-def load_mnist(bath_size, train_size=0.8):
+def load_mnist(bath_size, train_size=1):
     """
     this function loads the mnist data set to the script.
     it splits the training data into train data and evaluation data
