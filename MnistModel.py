@@ -3,6 +3,7 @@ import torch
 import visdom
 import torchvision.datasets.mnist
 import time
+import copy
 
 """
 File Name       :  MnistModel.py
@@ -20,17 +21,35 @@ note that in order to run the file you need to open a visdom server.
 
 class Plot:
     def __init__(self, name_x, name_y, viz):
+        """
+        this class represents a visdom plot. It contains the name of the x axis
+        and the y axis which define the type of the plot
+        :param name_x: the name of the x axis
+        :param name_y: the name of the y axis
+        :param viz: the visdom server object
+        """
         self.x_title = name_x
         self.y_title = name_y
         self.viz = viz
         self.window = None
 
     def draw_plot(self, dict_vals, name, up='insert'):
+        """
+        this function sends the data of the plot to the visdom server.
+         It takes a dictionary with the required values and extracts the
+        :param dict_vals:
+        :param name: the name of the line
+        :param up: the type of update to perform to the graph
+        :return: display the graph on the visdom server
+        """
+        # if there is no graph displayed than create a new graph
         if self.window is None:
             window = self.viz.line(
                 X=dict_vals[self.x_title], Y=dict_vals[self.y_title],
                 name=name, opts=dict(xlabel=self.x_title, ylabel=self.y_title))
             self.window = window
+        # if there is already a graph than append the line to the existing
+        # graph
         else:
             self.viz.line(X=dict_vals[self.x_title], Y=dict_vals[self.y_title],
                           name=name, win=self.window,
@@ -47,6 +66,8 @@ class Layer:
         self.layer = layer_tensor
         self.index = layer_number
         try:
+            # give the input layer of the linear layer which comes after
+            # the conv layer
             if type(net.weights[self.index]) is torch.nn.Linear and type(
                     net.weights[self.index - 1]) is torch.nn.Conv2d:
                 self.layer = self.layer.view(-1, net.weights[self.index].
@@ -63,19 +84,24 @@ class NeuralNetwork(torch.nn.Module):
         :param layer_number: the number of layers in the network
         """
         super(NeuralNetwork, self).__init__()
-        # using the nvidia CUDA api in order to perform calculations on a GPU
         with torch.no_grad():
+            # using the nvidia CUDA api in order to perform calculations on a
+            # GPU
             self.device = torch.device('cuda' if torch.cuda.is_available()
                                        else 'cpu')
+            # the learning rate of the model
             self.rate = 0.1
+            # create loggers for the training process and the testing process.
             self.train_logger = {"loss": [], "cost": [], "accuracy": [],
                                  "epochs": []}
 
             self.test_logger = {"loss": [], "accuracy": [], "epochs": [],
                                 "cost": []}
-
+            # the visdom server
             self.viz = viz_tool
             self.network_layers = layer_number
+            # this is a spacial list of the weights, it acts like a normal
+            # list but it contains autograd objects
             self.weights = torch.nn.ModuleList()
 
         # initiate the weights
@@ -85,19 +111,24 @@ class NeuralNetwork(torch.nn.Module):
         # create an optimizer for the network
         self.optimizer = torch.optim.SGD(self.parameters(), lr=self.rate,
                                          momentum=0.8)
-
+        # create the plots for debugging
         self.cost_plot = Plot("epochs", "cost", self.viz)
         self.accuracy_plot = Plot("epochs", "accuracy",  self.viz)
 
-    def train_model(self, epochs, train_data, test_data=None):
+    def train_model(self, epochs, train_data, serial, test_data=None):
         """
         trains the model, this function takes the training data and preforms
         the feed forward, back propagation and the optimisation process
         :param epochs: the number of epochs to perform
         :param train_data: the data set
+        :param serial: unique identifier of the plot
+        :param test_data: the data to run tests on every epoch
         :return:
         """
         loss = None
+        # if there is no eval phase
+        if len(train_data) == 0:
+            return
         for epoch in range(epochs):
             correct = 0
             total = 0
@@ -141,11 +172,13 @@ class NeuralNetwork(torch.nn.Module):
         self.train_logger["epochs"] = list(range(epochs))
         self.test_logger["epochs"] = list(range(epochs))
         # create a graph of the cost in respect to the epochs
-        self.cost_plot.draw_plot(self.train_logger, "train")
-        self.cost_plot.draw_plot(self.test_logger, "test", up="append")
+        self.cost_plot.draw_plot(self.train_logger, "train" + serial)
+        self.cost_plot.draw_plot(self.test_logger, "test" + serial,
+                                 up="append")
         # create a graph of the accuracy in respect to epochs
-        self.accuracy_plot.draw_plot(self.train_logger, "train")
-        self.accuracy_plot.draw_plot(self.test_logger, "test", up="append")
+        self.accuracy_plot.draw_plot(self.train_logger, "train" + serial)
+        self.accuracy_plot.draw_plot(self.test_logger, "test" + serial,
+                                     up="append")
         # zero the loggers
         self.train_logger["cost"] = []
         self.train_logger["accuracy"] = []
@@ -289,6 +322,9 @@ def main():
     create_new_network(vis, train_loader, test_loader, eval_loader, layers=4,
                        epochs=10)
 
+    # model = load_model("SGD_99.25.ckpt", vis, 4)
+    # model.test_model(test_loader, display_data=True)
+
 
 def create_new_network(vis, train_loader, test_loader, eval_loader,
                        layers, epochs):
@@ -304,15 +340,15 @@ def create_new_network(vis, train_loader, test_loader, eval_loader,
     :return: the model created
     """
     model = NeuralNetwork(vis, layers)
-    model.train_model(epochs, train_loader, test_loader)
+    model.train_model(epochs, train_loader, '1', test_loader)
     # TODO: fix eval graph display
-    #model.train_model(epochs, eval_loader, test_loader)
+    model.train_model(epochs, eval_loader, '2', test_loader)
     model.test_model(test_loader, display_data=True)
     torch.save(model.state_dict(), 'model.ckpt')
     return model
 
 
-def load_mnist(bath_size, train_size=1):
+def load_mnist(bath_size, train_size=0.9):
     """
     this function loads the mnist data set to the script.
     it splits the training data into train data and evaluation data
