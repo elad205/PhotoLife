@@ -1,15 +1,13 @@
 import skimage
 import torch
-import visdom
 import numpy
 import torchvision
 
 
 class DataParser:
-    def __init__(self, batch_size):
+    def __init__(self):
         self.feature_list = []
         self.label_list = []
-        self.batch_size = batch_size
 
     def __next__(self):
         # stop when iterated over all of the objects
@@ -27,7 +25,8 @@ class DataParser:
         self.batch_counter = -1
         return self
 
-    def load_cifar10(self):
+    @staticmethod
+    def load_cifar10(batch_size):
         """
         this function loads the cifar10 database which contains various images
         into the script.
@@ -40,14 +39,14 @@ class DataParser:
 
         # load training data
         train_loader = torch.utils.data.DataLoader(
-            dataset=train_dataset, batch_size=self.batch_size, shuffle=True)
+            dataset=train_dataset, batch_size=batch_size, shuffle=True)
 
         test_dataset = torchvision.datasets.CIFAR10(
             root='cifar10',
             train=False, transform=torchvision.transforms.ToTensor())
         # load test data
         test_loader = torch.utils.data.DataLoader(
-            dataset=test_dataset, batch_size=self.batch_size, shuffle=False)
+            dataset=test_dataset, batch_size=batch_size, shuffle=False)
 
         return train_loader, test_loader
 

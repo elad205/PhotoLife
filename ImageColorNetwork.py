@@ -4,6 +4,7 @@ import visdom
 import torchvision.datasets.mnist
 import time
 import copy
+from DataParser import DataParser
 
 """
 File Name       :  MnistModel.py
@@ -315,19 +316,20 @@ def load_model(path, vis, layers):
 def main():
     # connect to the visdom server
     vis = visdom.Visdom()
-
+    train_data = DataParser()
+    test_data = DataParser()
     # initialise data set
-    train_loader, eval_loader, test_loader = load_mnist(bath_size=100)
+    train_loader, test_loader = DataParser.load_cifar10(batch_size=100)
+    train_data.parse_data(train_loader)
+    test_data.parse_data(test_loader)
     # create, train and test the network
-    create_new_network(vis, train_loader, test_loader, eval_loader, layers=4,
-                       epochs=10)
+    create_new_network(vis, train_data, test_data,  layers=4, epochs=10)
 
     # model = load_model("SGD_99.25.ckpt", vis, 4)
     # model.test_model(test_loader, display_data=True)
 
 
-def create_new_network(vis, train_loader, test_loader, eval_loader,
-                       layers, epochs):
+def create_new_network(vis, train_loader, test_loader, layers, epochs):
     """
     this function initialise the network, trains it on the train data and
     the evaluation data, tests it on the test data and saves the weights.
@@ -341,56 +343,9 @@ def create_new_network(vis, train_loader, test_loader, eval_loader,
     """
     model = NeuralNetwork(vis, layers)
     model.train_model(epochs, train_loader, '1', test_loader)
-    # TODO: fix eval graph display
-    model.train_model(epochs, eval_loader, '2', test_loader)
     model.test_model(test_loader, display_data=True)
     torch.save(model.state_dict(), 'model.ckpt')
     return model
-
-
-def load_mnist(bath_size, train_size=0.9):
-    """
-    this function loads the mnist data set to the script.
-    it splits the training data into train data and evaluation data
-    by the ratio determined by train size, default is 80% - 20%.
-    :param bath_size: the batch size of the data
-    :param train_size: the size of the train data in relative to the entire
-    train data
-    :return: a train loader object, an eval loader and a test loader.
-    """
-    # load mnist data set
-    train = torchvision.datasets.mnist.MNIST(
-        "data", train=True, download=True,
-        transform=torchvision.transforms.ToTensor())
-
-    # split the data to train data and validation data
-    # train is 80% of train data and validation is 20% of the train data
-    total_train = int(len(train) * train_size)
-    sampler = list(range(len(train)))
-    train_data = sampler[0: total_train]
-    eval_data = sampler[total_train:]
-    # create a random sample for each data set
-    train_data = torch.utils.data.sampler.SubsetRandomSampler(train_data)
-    eval_data = torch.utils.data.sampler.SubsetRandomSampler(eval_data)
-
-    # load training data
-    train_loader = torch.utils.data.DataLoader(dataset=train,
-                                               batch_size=bath_size,
-                                               sampler=train_data)
-    # load eval data
-    eval_loader = torch.utils.data.DataLoader(
-        dataset=train, batch_size=bath_size, sampler=eval_data)
-
-    test_dataset = torchvision.datasets.MNIST(root='data',
-                                              train=False,
-                                              transform=torchvision.transforms.
-                                              ToTensor())
-    # load test data
-    test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
-                                              batch_size=bath_size,
-                                              shuffle=False)
-
-    return train_loader, eval_loader, test_loader
 
 
 if __name__ == '__main__':
