@@ -106,8 +106,12 @@ class NeuralNetwork(torch.nn.Module):
             self.weights = torch.nn.ModuleList()
 
         # initiate the weights
-        self.init_weights_liniar_conv([('conv', 1, 20, 5), ('conv', 20, 50, 5),
-                                       ('lin', 800, 500), ('lin', 500, 10)])
+        self.init_weights_liniar_conv([
+            ('conv', 1, 30, 3),
+            ('conv', 30, 26, 3),
+            ('decoder', 64, 32, 3),
+            ('decoder', 32, 16, 3),
+            ('decoder', 16, 2, 3)])
 
         # create an optimizer for the network
         self.optimizer = torch.optim.SGD(self.parameters(), lr=self.rate,
@@ -128,8 +132,6 @@ class NeuralNetwork(torch.nn.Module):
         """
         loss = None
         # if there is no eval phase
-        if len(train_data) == 0:
-            return
         for epoch in range(epochs):
             correct = 0
             total = 0
@@ -142,7 +144,7 @@ class NeuralNetwork(torch.nn.Module):
                 labels = labels.to(self.device)
                 prediction_layer = self.forward(Layer(images, 0, net=self))
                 # calculate the loss
-                loss = self.softmax_loss(prediction_layer.layer, labels)
+                loss = self.mse_loss(prediction_layer.layer, labels)
 
                 # backpropagate through the network
                 self.optimizer.zero_grad()
@@ -209,11 +211,13 @@ class NeuralNetwork(torch.nn.Module):
         """
         # create the layer of the model
         calculated_layer = self.weights[layer.index](layer.layer)
+        print(layer.layer.size())
         # perform the activation function on every neuron [relu]
         # don't activate the prediction layer
         if layer.index < len(self.weights) - 1:
             activated_layer = calculated_layer.clamp(min=0)
             if type(self.weights[layer.index]) is torch.nn.Conv2d:
+                print("entred")
                 activated_layer = torch.nn.functional.max_pool2d(
                     activated_layer, 2, 2)
         else:
@@ -234,6 +238,12 @@ class NeuralNetwork(torch.nn.Module):
         loss = loss_softmax(prediction_layer, expected_output)
         return loss
 
+    @staticmethod
+    def mse_loss(prediction_layer, expected_output):
+        loss_mse = torch.nn.MSELoss()
+        loss = loss_mse(prediction_layer, expected_output)
+        return loss
+
     def init_weights_liniar_conv(self, sizes):
         for index in range(self.network_layers):
             if sizes[index][0] == 'lin':
@@ -244,6 +254,12 @@ class NeuralNetwork(torch.nn.Module):
                 self.weights.append(torch.nn.Conv2d(
                     sizes[index][1], sizes[index][2],
                     sizes[index][3]).to(self.device))
+
+            if sizes[index][0] == "decoder":
+                self.weights.append(
+                    torch.nn.ConvTranspose2d(
+                        sizes[index][1], sizes[index][2],
+                        sizes[index][3]).to(self.device))
 
     def test_model(self, test_data, display_data=False):
         """
@@ -323,7 +339,7 @@ def main():
     train_data.parse_data(train_loader)
     test_data.parse_data(test_loader)
     # create, train and test the network
-    create_new_network(vis, train_data, test_data,  layers=4, epochs=10)
+    create_new_network(vis, train_data, test_data,  layers=5, epochs=10)
 
     # model = load_model("SGD_99.25.ckpt", vis, 4)
     # model.test_model(test_loader, display_data=True)
@@ -336,7 +352,6 @@ def create_new_network(vis, train_loader, test_loader, layers, epochs):
     :param vis: the visdom server to display graphs
     :param train_loader: the training data
     :param test_loader: the testing data
-    :param eval_loader: the evaluation data
     :param layers: the number of layers in the model
     :param epochs: the number epochs to perform
     :return: the model created
