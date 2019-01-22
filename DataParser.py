@@ -16,7 +16,8 @@ class DataParser:
         """
         this function loads the cifar10 database which contains various images
         into the script.
-        :return a data loader object, a tuple for the training data and the test data.
+        :return a data loader object, a tuple for the training data and the
+        test data.
         """
         train_dataset = torchvision.datasets.CIFAR10(
             "data", train=True, download=True,
@@ -41,9 +42,11 @@ class DataParser:
     def parse_data(self, data_loader):
         """
         this function parses the data and splits it into features and labels.
-        It does that by converting the image into a numpy array and than performing operations
-        on the array in order to turn it into the structure required for skimage to convert the pic.
-        after that it returns the arrays to torch tensors and adds them to a list
+        It does that by converting the image into a numpy array and than
+        performing operations on the array in order to turn it into the
+        structure required for skimage to convert the pic.
+        after that it returns the arrays to torch tensors and adds them to a
+        list.
         :param data_loader: a dataloader object containing the data
         :return:
         """
@@ -51,14 +54,17 @@ class DataParser:
             # convert the images into numpy arrays
             images = images.numpy()
             
-            # swap the axes because skimage uses x , x , c format and torch uses c, x, x format
+            # swap the axes because skimage uses x , x , c format and torch
+            # uses c, x, x format
             images = numpy.swapaxes(images, 1, 3)
 
-            # perform the casting from rgb to lab and convert the image to values lower than 1.
+            # perform the casting from rgb to lab and convert the image to
+            # values lower than 1.
             lab_image = skimage.color.rgb2lab(1.0 / 255 * images)
 
             # extract the features
-            features = lab_image[:, :, :, 0].reshape(self.batch_size, self.image_axe, self.image_axe, 1)
+            features = lab_image[:, :, :, 0].reshape(
+                self.batch_size, self.image_axe, self.image_axe, 1)
 
             # extract the labels
             labels = lab_image[:, :, :, 1:]
@@ -67,7 +73,8 @@ class DataParser:
             labels = labels / 128
 
             # convert the data back to torch format
-            features = torch.FloatTensor(numpy.swapaxes(features, 1, 3).tolist())
+            features = torch.FloatTensor(
+                numpy.swapaxes(features, 1, 3).tolist())
             labels = torch.FloatTensor(numpy.swapaxes(labels, 1, 3).tolist())
 
             # append the data to the objects
