@@ -66,6 +66,7 @@ class Layer:
     def __init__(self, layer_tensor, layer_number, net):
         self.layer = layer_tensor
         self.index = layer_number
+        self.net = net
         try:
             # give the input layer of the linear layer which comes after
             # the conv layer
@@ -75,6 +76,16 @@ class Layer:
                                              in_features)
         except IndexError:
             pass
+
+    def calc_same_padding(self):
+
+        kernel_of_next_conv = self.net.weights[self.index].kernel_size
+
+        if type(kernel_of_next_conv) is tuple:
+            kernel_of_next_conv = kernel_of_next_conv[0]
+
+        padding_size = int((kernel_of_next_conv - 1) / 2)
+        self.net.weights[self.index].padding = (padding_size, padding_size)
 
 
 class NeuralNetwork(torch.nn.Module):
@@ -93,11 +104,9 @@ class NeuralNetwork(torch.nn.Module):
             # the learning rate of the model
             self.rate = 0.1
             # create loggers for the training process and the testing process.
-            self.train_logger = {"loss": [], "cost": [], "accuracy": [],
-                                 "epochs": []}
+            self.train_logger = {"loss": [], "cost": [], "epochs": []}
 
-            self.test_logger = {"loss": [], "accuracy": [], "epochs": [],
-                                "cost": []}
+            self.test_logger = {"loss": [], "epochs": [], "cost": []}
             # the visdom server
             self.viz = viz_tool
             self.network_layers = layer_number
@@ -107,11 +116,18 @@ class NeuralNetwork(torch.nn.Module):
 
         # initiate the weights
         self.init_weights_liniar_conv([
-            ('conv', 1, 30, 3),
-            ('conv', 30, 26, 3),
-            ('decoder', 64, 32, 3),
-            ('decoder', 32, 16, 3),
-            ('decoder', 16, 2, 3)])
+            ('conv', 1, 64, 3),
+            ('maxpooling', 3, 2),
+            ('conv', 64, 128, 3),
+            ('maxpooling', 3, 2),
+            ('conv', 128, 256, 3),
+            ('maxpooling', 3, 2),
+            ('conv', 256, 512, 3),
+            ('conv', 512, 256, 3),
+            ('decoder', 256, 128, 3, 2),
+            ('decoder', 128, 64, 3, 2),
+            ('conv', 64, 32, 3),
+            ('decoder', 32, 2, 3, 2)])
 
         # create an optimizer for the network
         self.optimizer = torch.optim.SGD(self.parameters(), lr=self.rate,
@@ -133,8 +149,6 @@ class NeuralNetwork(torch.nn.Module):
         loss = None
         # if there is no eval phase
         for epoch in range(epochs):
-            correct = 0
-            total = 0
             # run on all the data examples parsed by pytorch vision
             for i, (images, labels) in enumerate(train_data):
                 # flatten the image to 1d tensor
@@ -152,11 +166,6 @@ class NeuralNetwork(torch.nn.Module):
                 self.optimizer.step()
                 # save data for plots
                 self.train_logger["loss"].append(loss.item())
-                total += labels.size(0)
-
-                # calculate the accuracy
-                _, predicted = torch.max(prediction_layer.layer.data, 1)
-                correct += (predicted == labels.to(self.device)).sum().item()
 
             print("epoch {0} avg loss is {1}".format(
                 epoch, np.mean(self.train_logger["loss"])))
@@ -166,8 +175,6 @@ class NeuralNetwork(torch.nn.Module):
                 self.train_logger["loss"]))
             # zero out the losss
             self.train_logger["loss"] = []
-            # add accuracy
-            self.train_logger["accuracy"].append(correct / total)
 
             if test_data is not None:
                 self.test_model(test_data)
@@ -176,17 +183,10 @@ class NeuralNetwork(torch.nn.Module):
         self.test_logger["epochs"] = list(range(epochs))
         # create a graph of the cost in respect to the epochs
         self.cost_plot.draw_plot(self.train_logger, "train" + serial)
-        self.cost_plot.draw_plot(self.test_logger, "test" + serial,
-                                 up="append")
-        # create a graph of the accuracy in respect to epochs
-        self.accuracy_plot.draw_plot(self.train_logger, "train" + serial)
-        self.accuracy_plot.draw_plot(self.test_logger, "test" + serial,
-                                     up="append")
+
         # zero the loggers
         self.train_logger["cost"] = []
-        self.train_logger["accuracy"] = []
         self.test_logger["cost"] = []
-        self.test_logger["accuracy"] = []
 
     def forward(self, layer):
         """
@@ -210,16 +210,15 @@ class NeuralNetwork(torch.nn.Module):
         index
         """
         # create the layer of the model
+        if type(self.weights[layer.index]) is not torch.nn.ConvTranspose2d:
+            layer.calc_same_padding()
         calculated_layer = self.weights[layer.index](layer.layer)
-        print(layer.layer.size())
+        print(calculated_layer.size())
         # perform the activation function on every neuron [relu]
         # don't activate the prediction layer
-        if layer.index < len(self.weights) - 1:
+        if layer.index < len(self.weights) - 1 and type(
+                self.weights[layer.index]) is not torch.nn.MaxPool2d:
             activated_layer = calculated_layer.clamp(min=0)
-            if type(self.weights[layer.index]) is torch.nn.Conv2d:
-                print("entred")
-                activated_layer = torch.nn.functional.max_pool2d(
-                    activated_layer, 2, 2)
         else:
             activated_layer = calculated_layer
         return Layer(layer_tensor=activated_layer,
@@ -259,7 +258,11 @@ class NeuralNetwork(torch.nn.Module):
                 self.weights.append(
                     torch.nn.ConvTranspose2d(
                         sizes[index][1], sizes[index][2],
-                        sizes[index][3]).to(self.device))
+                        sizes[index][3], stride=sizes[index][4]).to(self.device))
+
+            if sizes[index][0] == "maxpooling":
+                self.weights.append(torch.nn.MaxPool2d(
+                    kernel_size=sizes[index][1], stride=sizes[index][2]))
 
     def test_model(self, test_data, display_data=False):
         """
@@ -339,7 +342,7 @@ def main():
     train_data.parse_data(train_loader)
     test_data.parse_data(test_loader)
     # create, train and test the network
-    create_new_network(vis, train_data, test_data,  layers=5, epochs=10)
+    create_new_network(vis, train_data, test_data,  layers=12, epochs=10)
 
     # model = load_model("SGD_99.25.ckpt", vis, 4)
     # model.test_model(test_loader, display_data=True)
@@ -357,8 +360,8 @@ def create_new_network(vis, train_loader, test_loader, layers, epochs):
     :return: the model created
     """
     model = NeuralNetwork(vis, layers)
-    model.train_model(epochs, train_loader, '1', test_loader)
-    model.test_model(test_loader, display_data=True)
+    model.train_model(epochs, train_loader, '1')
+    # model.test_model(test_loader, display_data=True)
     torch.save(model.state_dict(), 'model.ckpt')
     return model
 
