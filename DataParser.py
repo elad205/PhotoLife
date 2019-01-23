@@ -10,11 +10,13 @@ class DataParser:
         self.label_list = []
 
     def __next__(self):
+
+        # get to the next item
+        self.batch_counter += 1
+
         # stop when iterated over all of the objects
         if self.batch_counter == len(self.feature_list):
             raise StopIteration
-        # get to the next item
-        self.batch_counter += 1
 
         # return the images and labels
         return self.feature_list[self.batch_counter], self.label_list[
