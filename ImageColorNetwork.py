@@ -124,10 +124,10 @@ class NeuralNetwork(torch.nn.Module):
             ('maxpooling', 3, 2),
             ('conv', 256, 512, 3),
             ('conv', 512, 256, 3),
-            ('decoder', 256, 128, 3, 2),
-            ('decoder', 128, 64, 3, 2),
+            ('decoder', 256, 128, 2, 2),
+            ('decoder', 128, 64, 2, 2),
             ('conv', 64, 32, 3),
-            ('decoder', 32, 2, 3, 2)])
+            ('decoder', 32, 2, 2, 2)])
 
         # create an optimizer for the network
         self.optimizer = torch.optim.SGD(self.parameters(), lr=self.rate,
@@ -213,7 +213,6 @@ class NeuralNetwork(torch.nn.Module):
         if type(self.weights[layer.index]) is not torch.nn.ConvTranspose2d:
             layer.calc_same_padding()
         calculated_layer = self.weights[layer.index](layer.layer)
-        print(calculated_layer.size())
         # perform the activation function on every neuron [relu]
         # don't activate the prediction layer
         if layer.index < len(self.weights) - 1 and type(
