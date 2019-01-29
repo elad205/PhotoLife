@@ -79,13 +79,9 @@ class Layer:
 
     def calc_same_padding(self):
 
-        kernel_of_next_conv = self.net.weights[self.index].kernel_size
+        kernal = self.net.weights[self.index].kernel_size
+        self.net.weights[self.index].padding = (kernal[0] // 2, kernal[1] // 2)
 
-        if type(kernel_of_next_conv) is tuple:
-            kernel_of_next_conv = kernel_of_next_conv[0]
-
-        padding_size = int((kernel_of_next_conv - 1) / 2)
-        self.net.weights[self.index].padding = (padding_size, padding_size)
 
 
 class NeuralNetwork(torch.nn.Module):
@@ -116,22 +112,18 @@ class NeuralNetwork(torch.nn.Module):
 
         # initiate the weights
         self.init_weights_liniar_conv([
-            ('conv', 1, 64, 3),
-            ('maxpooling', 3, 2),
-            ('conv', 64, 128, 3),
-            ('maxpooling', 3, 2),
-            ('conv', 128, 256, 3),
-            ('maxpooling', 3, 2),
-            ('conv', 256, 512, 3),
-            ('conv', 512, 256, 3),
-            ('decoder', 256, 128, 2, 2),
-            ('decoder', 128, 64, 2, 2),
-            ('conv', 64, 32, 3),
-            ('decoder', 32, 2, 2, 2)])
+            ('conv', 1, 8, 3, 2),
+            ('conv', 8, 8, 3, 1),
+            ('conv', 8, 16, 3, 1),
+            ('conv', 16, 16, 3, 2),
+            ('conv', 16, 32, 3, 1),
+            ('decoder', 32, 32, 3, 2),
+            ('decoder', 32, 32, 3, 1),
+            ('decoder', 32, 16, 3, 1),
+            ('conv', 16, 2, 3, 1)])
 
         # create an optimizer for the network
-        self.optimizer = torch.optim.SGD(self.parameters(), lr=self.rate,
-                                         momentum=0.8)
+        self.optimizer = torch.optim.SGD(self.parameters(), lr=self.rate)
         # create the plots for debugging
         self.cost_plot = Plot("epochs", "cost", self.viz)
         self.accuracy_plot = Plot("epochs", "accuracy",  self.viz)
@@ -147,10 +139,16 @@ class NeuralNetwork(torch.nn.Module):
         :return:
         """
         loss = None
+        images1 = None
+        labels1 = None
         # if there is no eval phase
         for epoch in range(epochs):
             # run on all the data examples parsed by pytorch vision
             for i, (images, labels) in enumerate(train_data):
+                if i == 1:
+                    break
+                images1 = images
+                labels1 = labels
                 # flatten the image to 1d tensor
                 # images = images.reshape(-1, 28 * 28).to(self.device)
                 # feed forward through the network
@@ -169,7 +167,6 @@ class NeuralNetwork(torch.nn.Module):
 
             print("epoch {0} avg loss is {1}".format(
                 epoch, np.mean(self.train_logger["loss"])))
-
             # every epoch calculate the average loss
             self.train_logger["cost"].append(np.mean(
                 self.train_logger["loss"]))
@@ -179,10 +176,17 @@ class NeuralNetwork(torch.nn.Module):
             if test_data is not None:
                 self.test_model(test_data)
         # add the number of epochs that were done
+        with torch.no_grad():
+            prediction_layer = self.forward(Layer(images1.to(self.device), 0, net=self))
+            self.viz.images(DataParser.reconstruct_image(images1, prediction_layer.layer, "1"))
+            self.viz.images(
+                DataParser.reconstruct_image(images1, labels1,
+                                            "2"))
         self.train_logger["epochs"] = list(range(epochs))
         self.test_logger["epochs"] = list(range(epochs))
         # create a graph of the cost in respect to the epochs
-        self.cost_plot.draw_plot(self.train_logger, "train" + serial)
+        #self.cost_plot.draw_plot(self.train_logger, "train" + serial)
+        #self.cost_plot.draw_plot(self.test_logger, "test" + serial)
 
         # zero the loggers
         self.train_logger["cost"] = []
@@ -210,16 +214,21 @@ class NeuralNetwork(torch.nn.Module):
         index
         """
         # create the layer of the model
-        if type(self.weights[layer.index]) is not torch.nn.ConvTranspose2d:
+        layer_params = self.weights[layer.index]
+        if type(layer_params) is not torch.nn.Upsample:
             layer.calc_same_padding()
         calculated_layer = self.weights[layer.index](layer.layer)
         # perform the activation function on every neuron [relu]
         # don't activate the prediction layer
-        if layer.index < len(self.weights) - 1 and type(
-                self.weights[layer.index]) is not torch.nn.MaxPool2d:
+
+        if layer.index == len(self.weights) - 1:
+            active = torch.nn.Tanh()
+            activated_layer = active(calculated_layer)
+        elif layer.index < len(self.weights) - 1:
             activated_layer = calculated_layer.clamp(min=0)
         else:
             activated_layer = calculated_layer
+
         return Layer(layer_tensor=activated_layer,
                      layer_number=layer.index + 1, net=self)
 
@@ -248,16 +257,14 @@ class NeuralNetwork(torch.nn.Module):
                 self.weights.append(torch.nn.Linear(
                     sizes[index][1], sizes[index][2]).to(self.device))
 
-            if sizes[index][0] == 'conv':
+            if sizes[index][0] == 'conv' or sizes[index][0] == 'decoder':
                 self.weights.append(torch.nn.Conv2d(
                     sizes[index][1], sizes[index][2],
-                    sizes[index][3]).to(self.device))
+                    sizes[index][3], stride=sizes[index][4]).to(self.device))
 
             if sizes[index][0] == "decoder":
                 self.weights.append(
-                    torch.nn.ConvTranspose2d(
-                        sizes[index][1], sizes[index][2],
-                        sizes[index][3], stride=sizes[index][4]).to(self.device))
+                    torch.nn.Upsample(scale_factor=2))
 
             if sizes[index][0] == "maxpooling":
                 self.weights.append(torch.nn.MaxPool2d(
@@ -272,16 +279,14 @@ class NeuralNetwork(torch.nn.Module):
         on the visdom server
         :return:
         """
-        total = 0
-        correct = 0
-        viz_win_text = None
         viz_win_images = None
-        if display_data:
-            viz_win_text = self.viz.text("")
+        viz_win_res = None
         with torch.no_grad():
             for i, (images, labels) in enumerate(test_data):
+                if i % 2 == 0:
+                    return
                 # display the images
-                if display_data:
+                if display_data and False:
                     if viz_win_images is None:
                         viz_win_images = self.viz.images(images)
                     else:
@@ -294,28 +299,24 @@ class NeuralNetwork(torch.nn.Module):
                 # feed forward through the network
                 prediction_layer = self.forward(Layer(images, 0, net=self)).\
                     layer
-                # check the most likely prediction in the layer
-                _, predicted = torch.max(prediction_layer.data, 1)
 
-                # display the answer
                 if display_data:
-                    data_display = str(predicted.cpu().numpy().tolist())
-                    self.viz.text(data_display, win=viz_win_text)
-
+                    final = DataParser.reconstruct_image(images,
+                                                         prediction_layer)
+                    if viz_win_res is None:
+                        viz_win_res = self.viz.images(final)
+                    else:
+                        self.viz.images(final, win=viz_win_res)
                 # calculate right answers
-                total += labels.size(0)
-                correct += (predicted == labels).sum().item()
                 # time.sleep(2)
-                self.test_logger["loss"].append(self.softmax_loss(
+                self.test_logger["loss"].append(self.mse_loss(
                     prediction_layer, labels).item())
-            # print the accuracy
-            if display_data:
-                self.viz.text(100 * correct / total)
-                print("accuracy is " + str(100 * correct / total))
 
+            final = DataParser.reconstruct_image(images,
+                                                 prediction_layer, self.viz)
+            self.viz.image(final)
             self.test_logger["cost"].append(np.mean(self.test_logger["loss"]))
             self.test_logger["loss"] = []
-            self.test_logger["accuracy"].append(correct / total)
 
 
 def load_model(path, vis, layers):
@@ -337,11 +338,11 @@ def main():
     train_data = DataParser()
     test_data = DataParser()
     # initialise data set
-    train_loader, test_loader = DataParser.load_cifar10(batch_size=100)
+    train_loader, test_loader = DataParser.load_cifar10(batch_size=1)
     train_data.parse_data(train_loader)
     test_data.parse_data(test_loader)
     # create, train and test the network
-    create_new_network(vis, train_data, test_data,  layers=12, epochs=10)
+    create_new_network(vis, train_data, test_data,  layers=9, epochs=3000)
 
     # model = load_model("SGD_99.25.ckpt", vis, 4)
     # model.test_model(test_loader, display_data=True)
@@ -358,9 +359,10 @@ def create_new_network(vis, train_loader, test_loader, layers, epochs):
     :param epochs: the number epochs to perform
     :return: the model created
     """
+    print("aaa")
     model = NeuralNetwork(vis, layers)
     model.train_model(epochs, train_loader, '1')
-    # model.test_model(test_loader, display_data=True)
+    model.test_model(test_loader, display_data=True)
     torch.save(model.state_dict(), 'model.ckpt')
     return model
 
