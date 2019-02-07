@@ -5,7 +5,7 @@ import visdom
 import cv2
 from PIL import Image
 import copy
-
+import matplotlib.pyplot as plt
 
 class DataParser:
     def __init__(self):
@@ -69,10 +69,9 @@ class DataParser:
         for i, (images, labels) in enumerate(data_loader):
             # convert the images into numpy arrays
             images = images.numpy()
-
             # swap the axes because cv2 uses x , x , c format and torch
             # uses c, x, x format
-            images = images.transpose((0, 3, 2, 1))
+            images = images.transpose((0, 2, 3, 1))
             # perform the casting from rgb to lab and convert the image to
             # values lower than 1.
             lab_image = []
@@ -86,17 +85,18 @@ class DataParser:
             c_dim = lab_image.shape[2]
             features = lab_image[:, :, :, 0].reshape(a_dim, b_dim, c_dim, 1)
             # convert the structure back to c,x,x
-            features = features.transpose((0, 3, 2, 1))
+            features = features.transpose((0, 3, 1, 2))
             # extract the labels
-            labels = images[:, :, :, 1:]
+            labels = lab_image[:, :, :, 1:]
+
             # make the label values smaller than 1
             labels = labels / 128
-            labels = numpy.asarray(labels)
             # convert the structure back to c,x,x
-            labels = labels.transpose((0, 3, 2, 1))
+            labels = labels.transpose((0, 3, 1, 2))
             # convert the data back to torch format
             features = torch.FloatTensor(features.tolist())
             labels = torch.FloatTensor(labels.tolist())
+            im = DataParser.reconstruct_image(features, labels)
             # append the data to the objects
             self.feature_list.append(features)
             self.label_list.append(labels)
@@ -108,15 +108,19 @@ class DataParser:
             self.label_list.append(images)
 
     @staticmethod
-    def deconstruct_to_batches(data):
-        batches = []
+    def reconstruct_image(feature, result, vis=None):
+        result = result * 128
+        f = feature.cpu().numpy()
+        r = result.cpu().numpy()
+        canvas = numpy.zeros((f.shape[0], 3, 32, 32), dtype='float32')
+        canvas[:, 0, :, :] = f.reshape(100, 32, 32)
+        canvas[:, 1:, :, :] = r
         lst = []
-        for batch in data:
-            for img in batch:
-                lst.append(img.numpy())
-            batches.append(copy.copy(lst))
-            lst = []
-        return numpy.asarray(batches)
+        canvas = canvas.transpose((0, 2, 3, 1))
+        for image in canvas:
+            lst.append(cv2.cvtColor(image, cv2.COLOR_LAB2RGB))
+
+        return numpy.asarray(lst).transpose((0, 3, 1, 2))
 
 
 def main():
