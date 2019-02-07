@@ -1,7 +1,10 @@
-import skimage
 import torch
 import numpy
 import torchvision
+import visdom
+import cv2
+from PIL import Image
+import copy
 
 
 class DataParser:
@@ -66,50 +69,59 @@ class DataParser:
         for i, (images, labels) in enumerate(data_loader):
             # convert the images into numpy arrays
             images = images.numpy()
-            
-            # swap the axes because skimage uses x , x , c format and torch
-            # uses c, x, x format
-            images = numpy.swapaxes(images, 1, 3)
 
+            # swap the axes because cv2 uses x , x , c format and torch
+            # uses c, x, x format
+            images = images.transpose((0, 3, 2, 1))
             # perform the casting from rgb to lab and convert the image to
             # values lower than 1.
-            lab_image = skimage.color.rgb2lab(1.0 / 255 * images)
+            lab_image = []
+            for image in images:
+                lab_image.append(cv2.cvtColor(image, cv2.COLOR_RGB2LAB))
 
+            lab_image = numpy.asarray(lab_image)
             # extract the features
             a_dim = lab_image.shape[0]
             b_dim = lab_image.shape[1]
             c_dim = lab_image.shape[2]
             features = lab_image[:, :, :, 0].reshape(a_dim, b_dim, c_dim, 1)
-
+            # convert the structure back to c,x,x
+            features = features.transpose((0, 3, 2, 1))
             # extract the labels
-            labels = lab_image[:, :, :, 1:]
+            labels = images[:, :, :, 1:]
             # make the label values smaller than 1
             labels = labels / 128
-
+            labels = numpy.asarray(labels)
+            # convert the structure back to c,x,x
+            labels = labels.transpose((0, 3, 2, 1))
             # convert the data back to torch format
-            features = torch.FloatTensor(
-                numpy.swapaxes(features, 1, 3).tolist())
-            labels = torch.FloatTensor(numpy.swapaxes(labels, 1, 3).tolist())
-
+            features = torch.FloatTensor(features.tolist())
+            labels = torch.FloatTensor(labels.tolist())
             # append the data to the objects
             self.feature_list.append(features)
             self.label_list.append(labels)
 
+    def rgb_parse(self, data_loader):
+        for images in data_loader:
+            images = images.numpy()
+            self.feature_list.append(cv2.cvtColor(images, cv2.COLOR_RGB2GRAY))
+            self.label_list.append(images)
+
+    @staticmethod
+    def deconstruct_to_batches(data):
+        batches = []
+        lst = []
+        for batch in data:
+            for img in batch:
+                lst.append(img.numpy())
+            batches.append(copy.copy(lst))
+            lst = []
+        return numpy.asarray(batches)
+
 
 def main():
-    a = DataParser(30)
-    im = a.load_cifar10()
-    a.parse_data(im[0])
-    b = None
-    # example of how to iterate on the object
-    for images, labels in a:
-        if b is None:
-            b = images
-        try:
-            print(torch.mean(b-images))
-            b = images
-        except RuntimeError:
-            pass
+    ob = DataParser()
+    ob.parse_data()
 
 
 if __name__ == '__main__':
