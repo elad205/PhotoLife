@@ -24,7 +24,7 @@ note that in order to run the file you need to open a visdom server.
 
 class PreTrainedModel(object):
     def __init__(self):
-        self.modified_res_net = torchvision.models.resnet18(pretrained=True)
+        self.modified_res_net = torchvision.models.resnet18(pretrained=True).to('cuda')
         self.modified_res_net.conv1.weight =  \
             torch.nn.Parameter(self.modified_res_net.conv1.weight.sum(dim=1).
                                unsqueeze(1).data)
@@ -142,7 +142,8 @@ class NeuralNetwork(torch.nn.Module):
             ('decoder', 2)])
 
         # create an optimizer for the network
-        self.optimizer = torch.optim.RMSprop(self.parameters())
+        self.optimizer = torch.optim.SGD(self.parameters(), lr=self.rate,
+                                         momentum=0.8)
         # create the plots for debugging
         self.cost_plot = Plot("epochs", "cost", self.viz)
         self.accuracy_plot = Plot("epochs", "accuracy",  self.viz)
@@ -164,10 +165,10 @@ class NeuralNetwork(torch.nn.Module):
         for epoch in range(epochs):
             # run on all the data examples parsed by pytorch vision
             for i, (images, labels) in enumerate(train_data):
-                images = self.pre_model.return_resnet_output(images)
                 # feed forward through the network
                 images = images.to(self.device)
                 labels = labels.to(self.device)
+                images = self.pre_model.return_resnet_output(images)
                 prediction_layer = self.forward(Layer(images, 0, net=self))
                 # calculate the loss
                 loss = self.mse_loss(prediction_layer.layer, labels, images=images)
@@ -196,9 +197,7 @@ class NeuralNetwork(torch.nn.Module):
         # create a graph of the cost in respect to the epochs
         #self.cost_plot.draw_plot(self.train_logger, "train" + serial)
         #self.cost_plot.draw_plot(self.test_logger, "test" + serial)
-        final = DataParser.reconstruct_image(images,
-                                             prediction_layer.layer, self.viz)
-        self.viz.images(final)
+
         # zero the loggers
         self.train_logger["cost"] = []
         self.test_logger["cost"] = []
@@ -278,7 +277,7 @@ class NeuralNetwork(torch.nn.Module):
 
             if sizes[index][0] == "decoder":
                 self.weights.append(
-                    torch.nn.Upsample(scale_factor=sizes[index][1]))
+                    torch.nn.Upsample(scale_factor=sizes[index][1])).to(self.device)
 
             if sizes[index][0] == "batchnorm":
                 self.weights.append(torch.nn.BatchNorm2d(sizes[index][1]))\
@@ -303,22 +302,25 @@ class NeuralNetwork(torch.nn.Module):
         with torch.no_grad():
             for i, (images, labels) in enumerate(test_data):
                 # display the images
-                if display_data and False:
+                if display_data:
+                    disp = DataParser.reconstruct_image(images, labels)
                     if viz_win_images is None:
-                        viz_win_images = self.viz.images(images)
+                        viz_win_images = self.viz.images(disp)
                     else:
-                        self.viz.images(images, win=viz_win_images)
+                        self.viz.images(disp, win=viz_win_images)
+
+                    images_copy = copy.copy(images)
 
                 # parse the images and labels
-                # images = images.reshape(-1, 28 * 28).to(self.device)
                 images = images.to(self.device)
                 labels = labels.to(self.device)
+                images = self.pre_model.return_resnet_output(images)
                 # feed forward through the network
                 prediction_layer = self.forward(Layer(images, 0, net=self)).\
                     layer
 
                 if display_data:
-                    final = DataParser.reconstruct_image(images,
+                    final = DataParser.reconstruct_image(images_copy,
                                                          prediction_layer)
                     if viz_win_res is None:
                         viz_win_res = self.viz.images(final)
@@ -329,9 +331,7 @@ class NeuralNetwork(torch.nn.Module):
                 self.test_logger["loss"].append(self.mse_loss(
                     prediction_layer, labels).item())
 
-            final = DataParser.reconstruct_image(images,
-                                                 prediction_layer, self.viz)
-            self.viz.images(final)
+
             self.test_logger["cost"].append(np.mean(self.test_logger["loss"]))
             self.test_logger["loss"] = []
 
@@ -359,7 +359,7 @@ def main():
     train_data.parse_data(train_loader)
     test_data.parse_data(test_loader)
     # create, train and test the network
-    create_new_network(vis, train_data, test_data,  layers=11, epochs=10)
+    create_new_network(vis, train_data, test_data,  layers=11, epochs=20)
 
     # model = load_model("SGD_99.25.ckpt", vis, 4)
     # model.test_model(test_loader, display_data=True)
