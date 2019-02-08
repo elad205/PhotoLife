@@ -6,6 +6,9 @@ import cv2
 from PIL import Image
 import copy
 import matplotlib.pyplot as plt
+from torchvision import transforms
+import progressbar
+
 
 class DataParser:
     def __init__(self):
@@ -55,6 +58,30 @@ class DataParser:
 
         return train_loader, test_loader
 
+    @staticmethod
+    def load_places_dataset(batch_size):
+        train_dir = r'D:\data_256'
+        test_dir = r'D:\data_test_256'
+
+        train_dataset = torchvision.datasets.ImageFolder(
+            train_dir,
+            transforms.Compose([transforms.RandomResizedCrop(224),
+                                transforms.RandomHorizontalFlip(),
+                                transforms.ToTensor()]))
+        test_dataset = torchvision.datasets.ImageFolder(
+            test_dir,
+            transforms.Compose([transforms.RandomResizedCrop(224),
+                                transforms.RandomHorizontalFlip(),
+                                transforms.ToTensor()]))
+
+        train_loader = torch.utils.data.DataLoader(
+            dataset=train_dataset, batch_size=batch_size, shuffle=True)
+
+        test_loader = torch.utils.data.DataLoader(
+            dataset=test_dataset, batch_size=batch_size, shuffle=False)
+
+        return train_loader, test_loader
+
     def parse_data(self, data_loader):
         """
         this function parses the data and splits it into features and labels.
@@ -66,6 +93,11 @@ class DataParser:
         :param data_loader: a data loader object containing the data
         :return:
         """
+        prog = progressbar.ProgressBar(
+            widgets=['parsing data',
+                     progressbar.Percentage(),
+                     ' ', progressbar.ETA()], max_value=len(data_loader))
+        print(len(data_loader))
         for i, (images, labels) in enumerate(data_loader):
             # convert the images into numpy arrays
             images = images.numpy()
@@ -78,6 +110,7 @@ class DataParser:
             for image in images:
                 lab_image.append(cv2.cvtColor(image, cv2.COLOR_RGB2LAB))
 
+            prog.update(i + 1)
             lab_image = numpy.asarray(lab_image)
             # extract the features
             a_dim = lab_image.shape[0]
@@ -94,12 +127,14 @@ class DataParser:
             # convert the structure back to c,x,x
             labels = labels.transpose((0, 3, 1, 2))
             # convert the data back to torch format
-            features = torch.FloatTensor(features.tolist())
-            labels = torch.FloatTensor(labels.tolist())
-            im = DataParser.reconstruct_image(features, labels)
+            features = torch.from_numpy(features)
+            labels = torch.from_numpy(labels)
             # append the data to the objects
             self.feature_list.append(features)
             self.label_list.append(labels)
+            del lab_image
+
+        prog.finish()
 
     def rgb_parse(self, data_loader):
         for images in data_loader:
@@ -112,8 +147,8 @@ class DataParser:
         result = result * 128
         f = feature.cpu().numpy()
         r = result.cpu().numpy()
-        canvas = numpy.zeros((f.shape[0], 3, 32, 32), dtype='float32')
-        canvas[:, 0, :, :] = f.reshape(100, 32, 32)
+        canvas = numpy.zeros((f.shape[0], 3, 224, 224), dtype='float32')
+        canvas[:, 0, :, :] = f.reshape(f.shape[0], 224, 224)
         canvas[:, 1:, :, :] = r
         lst = []
         canvas = canvas.transpose((0, 2, 3, 1))
