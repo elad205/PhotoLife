@@ -5,6 +5,7 @@ import torchvision.datasets.mnist
 import torchvision
 import copy
 from data.DataParser import DataParser
+from torch import nn
 
 """
 File Name       :  MnistModel.py
@@ -93,14 +94,15 @@ class Layer:
             pass
 
     def calc_same_padding(self):
-
         kernal = self.net.weights[self.index].kernel_size
+
         if type(kernal) == int:
             kernal = (kernal, kernal)
+
         self.net.weights[self.index].padding = (kernal[0] // 2, kernal[1] // 2)
 
 
-class NeuralNetwork(torch.nn.Module):
+class NeuralNetwork(nn.Module):
     def __init__(self, viz_tool, layer_number, pre_model):
         """
         initialize the network variables
@@ -128,15 +130,18 @@ class NeuralNetwork(torch.nn.Module):
 
         # initiate the weights
         self.init_weights_liniar_conv([
-            ('deconv', 128, 128, 4, 2),
             ('conv', 128, 128, 3, 1),
             ('batchnorm', 128),
+            ('relu', None),
+            ('decoder', 2),
             ('conv', 128, 64, 3, 1),
             ('batchnorm', 64),
+            ('relu', None),
             ('conv', 64, 64, 3, 1),
-            ('batchnorm', 64),
+            ('relu', None),
+            ('decoder', 2),
             ('conv', 64, 32, 3, 1),
-            ('conv', 32, 2, 3, 1),
+            ('tanh', None),
             ('decoder', 2)])
 
         # create an optimizer for the network
@@ -158,7 +163,6 @@ class NeuralNetwork(torch.nn.Module):
         :param test_data: the data to run tests on every epoch
         :return:
         """
-        loss = None
         # if there is no eval phase
         for epoch in range(epochs):
             # run on all the data examples parsed by pytorch vision
@@ -193,8 +197,8 @@ class NeuralNetwork(torch.nn.Module):
         self.train_logger["epochs"] = list(range(epochs))
         self.test_logger["epochs"] = list(range(epochs))
         # create a graph of the cost in respect to the epochs
-        #self.cost_plot.draw_plot(self.train_logger, "train" + serial)
-        #self.cost_plot.draw_plot(self.test_logger, "test" + serial)
+        self.cost_plot.draw_plot(self.train_logger, "train" + serial)
+        self.cost_plot.draw_plot(self.test_logger, "test" + serial)
 
         # zero the loggers
         self.train_logger["cost"] = []
@@ -222,70 +226,58 @@ class NeuralNetwork(torch.nn.Module):
         index
         """
         # create the layer of the model
-        layer_params = self.weights[layer.index]
-        if type(layer_params) is not torch.nn.Upsample and \
-                type(layer_params) is not torch.nn.BatchNorm2d:
-            layer.calc_same_padding()
-            calculated_layer = self.weights[layer.index](layer.layer)
-            # perform the activation function on every neuron [relu]
-            # the last layer has to be with negative values so we use tanh
-            if layer.index == len(self.weights) - 2:
-                active = torch.nn.Tanh()
-                activated_layer = active(calculated_layer)
-            elif layer.index < len(self.weights) - 2:
-                activated_layer = calculated_layer.clamp(min=0)
+        # perform the activation function on every neuron [relu]
+        # the last layer has to be with negative values so we use tanh
 
-            else:
-                activated_layer = calculated_layer
-        else:
-            calculated_layer = self.weights[layer.index](layer.layer)
-            activated_layer = calculated_layer
-        return Layer(layer_tensor=activated_layer,
+        layer_params = self.weights[layer.index]
+
+        # perform same padding on conv layers
+        if type(layer_params) is nn.Conv2d or type(layer_params) is \
+                nn.ConvTranspose2d:
+            layer.calc_same_padding()
+
+        # pass the data through
+        calculated_layer = layer_params(layer.layer)
+
+        # return the next layer in the network
+        return Layer(layer_tensor=calculated_layer,
                      layer_number=layer.index + 1, net=self)
 
     @staticmethod
-    def softmax_loss(prediction_layer, expected_output):
-        """
-        calculate the nll loss of the network
-        :param prediction_layer: the predication layer
-        :param expected_output: the loss of the model
-        :return:the loss
-        """
-        # softmax + log is better than performing the actions separately
-        loss_softmax = torch.nn.CrossEntropyLoss()
-        loss = loss_softmax(prediction_layer, expected_output)
-        return loss
-
-    @staticmethod
     def mse_loss(prediction_layer, expected_output):
-        loss_mse = torch.nn.MSELoss()
+        loss_mse = nn.MSELoss()
         loss = loss_mse(prediction_layer, expected_output)
         return loss
 
     def init_weights_liniar_conv(self, sizes):
         for index in range(self.network_layers):
             if sizes[index][0] == 'lin':
-                self.weights.append(torch.nn.Linear(
+                self.weights.append(nn.Linear(
                     sizes[index][1], sizes[index][2]).to(self.device))
 
             if sizes[index][0] == 'conv':
-                self.weights.append(torch.nn.Conv2d(
+                self.weights.append(nn.Conv2d(
                     sizes[index][1], sizes[index][2],
                     sizes[index][3], stride=sizes[index][4]).to(self.device))
 
             if sizes[index][0] == "decoder":
-                self.weights.append(
-                    torch.nn.Upsample(scale_factor=sizes[index][1])).to(
-                    self.device)
+                self.weights.append(nn.Upsample(
+                    scale_factor=sizes[index][1])).to(self.device)
 
             if sizes[index][0] == "batchnorm":
-                self.weights.append(torch.nn.BatchNorm2d(sizes[index][1]))\
+                self.weights.append(nn.BatchNorm2d(sizes[index][1]))\
                     .to(self.device)
 
             if sizes[index][0] == "deconv":
-                self.weights.append(torch.nn.ConvTranspose2d(
+                self.weights.append(nn.ConvTranspose2d(
                     sizes[index][1], sizes[index][2], sizes[index][3],
                     stride=sizes[index][4])).to(self.device)
+
+            if sizes[index][0] == "relu":
+                self.weights.append(nn.ReLU())
+
+            if sizes[index][0] == "tanh":
+                self.weights.append(nn.Tanh())
 
     def test_model(self, test_data, display_data=False):
         """
@@ -342,7 +334,8 @@ def load_model(path, vis, layers):
     :param layers: the number of layers of the network
     :return: loaded model
     """
-    model = NeuralNetwork(vis, layers)
+    pre_model = PreTrainedModel()
+    model = NeuralNetwork(vis, layers, pre_model)
     model.load_state_dict(torch.load(path))
     model.eval()
     return model
@@ -350,20 +343,15 @@ def load_model(path, vis, layers):
 
 def main():
     # connect to the visdom server
-    try:
-        vis = visdom.Visdom()
-    except ConnectionRefusedError:
-        print("couldn't connect to a visdom server")
-        exit(0)
-
+    vis = visdom.Visdom()
     train_data = DataParser()
     test_data = DataParser()
     # initialise data set
     train_loader, test_loader = DataParser.load_places_dataset(batch_size=16)
-    train_data.parse_data(train_loader)
-    test_data.parse_data(test_loader)
+    train_data.parse_data(train_loader, stopper=938)
+    test_data.parse_data(test_loader, stopper=130)
     # create, train and test the network
-    create_new_network(vis, train_data, test_data,  layers=11, epochs=50)
+    create_new_network(vis, train_data, test_data,  layers=13, epochs=50)
 
 
 def create_new_network(vis, train_loader, test_loader, layers, epochs):
@@ -377,7 +365,7 @@ def create_new_network(vis, train_loader, test_loader, layers, epochs):
     :param epochs: the number epochs to perform
     :return: the model created
     """
-    print("aaa")
+    print("started training")
     pre_model = PreTrainedModel()
     model = NeuralNetwork(vis, layers, pre_model)
     model.train_model(epochs, train_loader, '1', test_loader)
