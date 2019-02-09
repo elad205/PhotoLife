@@ -142,6 +142,7 @@ class NeuralNetwork(nn.Module):
             ('decoder', 2),
             ('conv', 64, 32, 3, 1),
             ('tanh', None),
+            ('conv', 32, 2, 3, 1),
             ('decoder', 2)])
 
         # create an optimizer for the network
@@ -351,7 +352,7 @@ def main():
     train_data.parse_data(train_loader, stopper=938)
     test_data.parse_data(test_loader, stopper=130)
     # create, train and test the network
-    create_new_network(vis, train_data, test_data,  layers=13, epochs=50)
+    create_new_network(vis, train_data, test_data,  layers=14, epochs=50)
 
 
 def create_new_network(vis, train_loader, test_loader, layers, epochs):
