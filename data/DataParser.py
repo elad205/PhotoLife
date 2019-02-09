@@ -1,11 +1,7 @@
 import torch
 import numpy
 import torchvision
-import visdom
 import cv2
-from PIL import Image
-import copy
-import matplotlib.pyplot as plt
 from torchvision import transforms
 import progressbar
 
@@ -82,7 +78,7 @@ class DataParser:
 
         return train_loader, test_loader
 
-    def parse_data(self, data_loader):
+    def parse_data(self, data_loader, stopper=None):
         """
         this function parses the data and splits it into features and labels.
         It does that by converting the image into a numpy array and than
@@ -91,14 +87,20 @@ class DataParser:
         after that it returns the arrays to torch tensors and adds them to a
         list.
         :param data_loader: a data loader object containing the data
+        :param stopper: a number that indicates when to stop loading data
+        to the memory
         :return:
         """
         prog = progressbar.ProgressBar(
-            widgets=['parsing data',
-                     progressbar.Percentage(),
-                     ' ', progressbar.ETA()], max_value=len(data_loader))
-        print(len(data_loader))
+            widgets=['parsing data ', progressbar.SimpleProgress(), ' ',
+                     progressbar.ETA()],
+            max_value=len(
+                data_loader) * 16 if stopper is None else stopper * 16)
+
         for i, (images, labels) in enumerate(data_loader):
+            # used to get only a fraction of the dataset
+            if stopper is not None and i > stopper:
+                break
             # convert the images into numpy arrays
             images = images.numpy()
             # swap the axes because cv2 uses x , x , c format and torch
@@ -110,7 +112,6 @@ class DataParser:
             for image in images:
                 lab_image.append(cv2.cvtColor(image, cv2.COLOR_RGB2LAB))
 
-            prog.update(i + 1)
             lab_image = numpy.asarray(lab_image)
             # extract the features
             a_dim = lab_image.shape[0]
@@ -129,6 +130,7 @@ class DataParser:
             # convert the data back to torch format
             features = torch.from_numpy(features)
             labels = torch.from_numpy(labels)
+            prog.update(i * a_dim)
             # append the data to the objects
             self.feature_list.append(features)
             self.label_list.append(labels)
@@ -143,7 +145,7 @@ class DataParser:
             self.label_list.append(images)
 
     @staticmethod
-    def reconstruct_image(feature, result, vis=None):
+    def reconstruct_image(feature, result):
         result = result * 128
         f = feature.cpu().numpy()
         r = result.cpu().numpy()
