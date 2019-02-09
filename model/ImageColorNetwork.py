@@ -3,10 +3,8 @@ import torch
 import visdom
 import torchvision.datasets.mnist
 import torchvision
-import time
 import copy
-from DataParser import DataParser
-from ChunkedImage import ChunkImage
+from data.DataParser import DataParser
 
 """
 File Name       :  MnistModel.py
@@ -24,7 +22,8 @@ note that in order to run the file you need to open a visdom server.
 
 class PreTrainedModel(object):
     def __init__(self):
-        self.modified_res_net = torchvision.models.resnet18(pretrained=True).to('cuda')
+        self.modified_res_net = torchvision.models.resnet18(pretrained=True).\
+            to('cuda')
         self.modified_res_net.conv1.weight =  \
             torch.nn.Parameter(self.modified_res_net.conv1.weight.sum(dim=1).
                                unsqueeze(1).data)
@@ -129,11 +128,10 @@ class NeuralNetwork(torch.nn.Module):
 
         # initiate the weights
         self.init_weights_liniar_conv([
-            ('decoder', 2),
+            ('deconv', 128, 128, 4, 2),
             ('conv', 128, 128, 3, 1),
             ('batchnorm', 128),
             ('conv', 128, 64, 3, 1),
-            ('decoder', 2),
             ('batchnorm', 64),
             ('conv', 64, 64, 3, 1),
             ('batchnorm', 64),
@@ -171,7 +169,7 @@ class NeuralNetwork(torch.nn.Module):
                 images = self.pre_model.return_resnet_output(images)
                 prediction_layer = self.forward(Layer(images, 0, net=self))
                 # calculate the loss
-                loss = self.mse_loss(prediction_layer.layer, labels, images=images)
+                loss = self.mse_loss(prediction_layer.layer, labels)
 
                 # backpropagate through the network
                 self.optimizer.zero_grad()
@@ -259,7 +257,7 @@ class NeuralNetwork(torch.nn.Module):
         return loss
 
     @staticmethod
-    def mse_loss(prediction_layer, expected_output, images=None):
+    def mse_loss(prediction_layer, expected_output):
         loss_mse = torch.nn.MSELoss()
         loss = loss_mse(prediction_layer, expected_output)
         return loss
@@ -277,7 +275,8 @@ class NeuralNetwork(torch.nn.Module):
 
             if sizes[index][0] == "decoder":
                 self.weights.append(
-                    torch.nn.Upsample(scale_factor=sizes[index][1])).to(self.device)
+                    torch.nn.Upsample(scale_factor=sizes[index][1])).to(
+                    self.device)
 
             if sizes[index][0] == "batchnorm":
                 self.weights.append(torch.nn.BatchNorm2d(sizes[index][1]))\
@@ -331,7 +330,6 @@ class NeuralNetwork(torch.nn.Module):
                 self.test_logger["loss"].append(self.mse_loss(
                     prediction_layer, labels).item())
 
-
             self.test_logger["cost"].append(np.mean(self.test_logger["loss"]))
             self.test_logger["loss"] = []
 
@@ -346,23 +344,26 @@ def load_model(path, vis, layers):
     """
     model = NeuralNetwork(vis, layers)
     model.load_state_dict(torch.load(path))
+    model.eval()
     return model
 
 
 def main():
     # connect to the visdom server
-    vis = visdom.Visdom()
+    try:
+        vis = visdom.Visdom()
+    except ConnectionRefusedError:
+        print("couldn't connect to a visdom server")
+        exit(0)
+
     train_data = DataParser()
     test_data = DataParser()
     # initialise data set
-    train_loader, test_loader = DataParser.load_cifar10(batch_size=100)
+    train_loader, test_loader = DataParser.load_places_dataset(batch_size=16)
     train_data.parse_data(train_loader)
     test_data.parse_data(test_loader)
     # create, train and test the network
-    create_new_network(vis, train_data, test_data,  layers=11, epochs=20)
-
-    # model = load_model("SGD_99.25.ckpt", vis, 4)
-    # model.test_model(test_loader, display_data=True)
+    create_new_network(vis, train_data, test_data,  layers=11, epochs=50)
 
 
 def create_new_network(vis, train_loader, test_loader, layers, epochs):
@@ -381,7 +382,7 @@ def create_new_network(vis, train_loader, test_loader, layers, epochs):
     model = NeuralNetwork(vis, layers, pre_model)
     model.train_model(epochs, train_loader, '1', test_loader)
     model.test_model(test_loader, display_data=True)
-    torch.save(model.state_dict(), 'model.ckpt')
+    torch.save(model.state_dict(), 'colorizer.ckpt')
     return model
 
 
