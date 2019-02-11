@@ -8,21 +8,27 @@ from data.DataParser import DataParser
 from torch import nn
 
 """
-File Name       :  MnistModel.py
+File Name       :  ImageColorNetwork.py
 Author:         :  Elad Cynamon
-Date            :  11.01.2018
+Date            :  11.02.2019
 Version         :  1.0 ready
 
-this file is a Neural network model that classifies digits and trains on 
-the mnist dataset. 
+this file is a nural net model that colorizes black and white images.
+the first input is passed through the pre-trained resnet18 model and after 
+the few first layers to the colorizer network.
 the module used for the network is pytorch.
 the program displays graphs and test data on a visdom server.
-note that in order to run the file you need to open a visdom server. 
+note that in order to run the file you need to open a visdom server.
+the data set which is currently used is the places dataset.
 """
 
 
 class PreTrainedModel(object):
     def __init__(self):
+        """
+        this function loads the resnet model and changes its input to fit
+        black and white images.
+        """
         self.modified_res_net = torchvision.models.resnet18(pretrained=True).\
             to('cuda')
         self.modified_res_net.conv1.weight =  \
@@ -33,6 +39,11 @@ class PreTrainedModel(object):
             torch.nn.Sequential(*list(self.modified_res_net.children())[0:6])
 
     def return_resnet_output(self, bw_image):
+        """
+        passes the image through the model
+        :param bw_image: a black and white image
+        :return: the output of the first six layers
+        """
         return self.proccesed_features(bw_image)
 
 
@@ -269,11 +280,6 @@ class NeuralNetwork(nn.Module):
                 self.weights.append(nn.BatchNorm2d(sizes[index][1]))\
                     .to(self.device)
 
-            if sizes[index][0] == "deconv":
-                self.weights.append(nn.ConvTranspose2d(
-                    sizes[index][1], sizes[index][2], sizes[index][3],
-                    stride=sizes[index][4])).to(self.device)
-
             if sizes[index][0] == "relu":
                 self.weights.append(nn.ReLU())
 
@@ -342,17 +348,24 @@ def load_model(path, vis, layers):
     return model
 
 
-def main():
+def main(train_flag=True):
     # connect to the visdom server
     vis = visdom.Visdom()
+    print("make sure visdom server is activated")
     train_data = DataParser()
     test_data = DataParser()
     # initialise data set
     train_loader, test_loader = DataParser.load_places_dataset(batch_size=16)
-    train_data.parse_data(train_loader, stopper=938)
-    test_data.parse_data(test_loader, stopper=130)
-    # create, train and test the network
-    create_new_network(vis, train_data, test_data,  layers=14, epochs=50)
+    if train_flag:
+        train_data.parse_data(train_loader, stopper=938)
+        test_data.parse_data(test_loader, stopper=130)
+        # create, train and test the network
+        create_new_network(vis, train_data, test_data,  layers=14, epochs=50)
+    else:
+        # load the model and test if
+        model = load_model("colorizer.ckpt", vis, 14)
+        test_data.parse_data(test_loader, stopper=129)
+        model.test_model(test_data, display_data=True)
 
 
 def create_new_network(vis, train_loader, test_loader, layers, epochs):
@@ -376,4 +389,5 @@ def create_new_network(vis, train_loader, test_loader, layers, epochs):
 
 
 if __name__ == '__main__':
-    main()
+    # set train flag to false to load pre trained model
+    main(train_flag=False)
