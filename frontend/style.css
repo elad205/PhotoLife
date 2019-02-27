@@ -1,0 +1,11 @@
+#topPage{
+    width: 100vw;
+    height: 5vw;
+    text-align: center;
+}
+
+#title{
+    font-size: 5vw;
+    font-family: 'Trocchi';
+    white-space: nowrap;
+}
