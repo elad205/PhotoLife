@@ -114,7 +114,8 @@ class Layer:
 
 
 class NeuralNetwork(nn.Module):
-    def __init__(self, viz_tool, layer_number, pre_model):
+    def __init__(self, viz_tool, layer_number, pre_model, learnin_rate,
+                 structure):
         """
         initialize the network variables
         :param viz_tool: visdom object to display plots
@@ -127,7 +128,7 @@ class NeuralNetwork(nn.Module):
             self.device = torch.device('cuda' if torch.cuda.is_available()
                                        else 'cpu')
             # the learning rate of the model
-            self.rate = 0.1
+            self.rate = learnin_rate
             # create loggers for the training process and the testing process.
             self.train_logger = {"loss": [], "cost": [], "epochs": []}
 
@@ -140,21 +141,7 @@ class NeuralNetwork(nn.Module):
             self.weights = torch.nn.ModuleList()
 
         # initiate the weights
-        self.init_weights_liniar_conv([
-            ('conv', 128, 128, 3, 1),
-            ('batchnorm', 128),
-            ('relu', None),
-            ('decoder', 2),
-            ('conv', 128, 64, 3, 1),
-            ('batchnorm', 64),
-            ('relu', None),
-            ('conv', 64, 64, 3, 1),
-            ('relu', None),
-            ('decoder', 2),
-            ('conv', 64, 32, 3, 1),
-            ('tanh', None),
-            ('conv', 32, 2, 3, 1),
-            ('decoder', 2)])
+        self.init_weights_liniar_conv(structure)
 
         # create an optimizer for the network
         self.optimizer = torch.optim.SGD(self.parameters(), lr=self.rate,
@@ -342,7 +329,21 @@ def load_model(path, vis, layers):
     :return: loaded model
     """
     pre_model = PreTrainedModel()
-    model = NeuralNetwork(vis, layers, pre_model)
+    model = NeuralNetwork(vis, layers, pre_model, 0.1, [
+            ('conv', 128, 128, 3, 1),
+            ('batchnorm', 128),
+            ('relu', None),
+            ('decoder', 2),
+            ('conv', 128, 64, 3, 1),
+            ('batchnorm', 64),
+            ('relu', None),
+            ('conv', 64, 64, 3, 1),
+            ('relu', None),
+            ('decoder', 2),
+            ('conv', 64, 32, 3, 1),
+            ('tanh', None),
+            ('conv', 32, 2, 3, 1),
+            ('decoder', 2)])
     model.load_state_dict(torch.load(path))
     model.eval()
     return model
@@ -381,7 +382,21 @@ def create_new_network(vis, train_loader, test_loader, layers, epochs):
     """
     print("started training")
     pre_model = PreTrainedModel()
-    model = NeuralNetwork(vis, layers, pre_model)
+    model = NeuralNetwork(vis, layers, pre_model, 0.1, [
+            ('conv', 128, 128, 3, 1),
+            ('batchnorm', 128),
+            ('relu', None),
+            ('decoder', 2),
+            ('conv', 128, 64, 3, 1),
+            ('batchnorm', 64),
+            ('relu', None),
+            ('conv', 64, 64, 3, 1),
+            ('relu', None),
+            ('decoder', 2),  
+            ('conv', 64, 32, 3, 1),
+            ('tanh', None),
+            ('conv', 32, 2, 3, 1),
+            ('decoder', 2)])
     model.train_model(epochs, train_loader, '1', test_loader)
     model.test_model(test_loader, display_data=True)
     torch.save(model.state_dict(), 'colorizer.ckpt')
