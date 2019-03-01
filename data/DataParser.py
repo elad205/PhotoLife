@@ -147,8 +147,8 @@ class DataParser:
     @staticmethod
     def reconstruct_image(feature, result):
         result = result * 128
-        f = feature.cpu().numpy()
-        r = result.cpu().numpy()
+        f = feature.cpu().clone().detach().numpy()
+        r = result.cpu().clone().detach().numpy()
         canvas = numpy.zeros((f.shape[0], 3, 224, 224), dtype='float32')
         canvas[:, 0, :, :] = f.reshape(f.shape[0], 224, 224)
         canvas[:, 1:, :, :] = r

@@ -114,7 +114,7 @@ class Layer:
 
 
 class NeuralNetwork(nn.Module):
-    def __init__(self, viz_tool, layer_number, pre_model, learnin_rate,
+    def __init__(self, viz_tool, pre_model, learnin_rate,
                  structure):
         """
         initialize the network variables
@@ -135,7 +135,7 @@ class NeuralNetwork(nn.Module):
             self.test_logger = {"loss": [], "epochs": [], "cost": []}
             # the visdom server
             self.viz = viz_tool
-            self.network_layers = layer_number
+            self.network_layers = len(structure)
             # this is a spacial list of the weights, it acts like a normal
             # list but it contains autograd objects
             self.weights = torch.nn.ModuleList()
@@ -152,7 +152,7 @@ class NeuralNetwork(nn.Module):
 
         self.pre_model = pre_model
 
-    def train_model(self, epochs, train_data, serial, test_data=None):
+    def train_model(self, images, labels, discriminator=None):
         """
         trains the model, this function takes the training data and preforms
         the feed forward, back propagation and the optimisation process
@@ -162,46 +162,26 @@ class NeuralNetwork(nn.Module):
         :param test_data: the data to run tests on every epoch
         :return:
         """
-        # if there is no eval phase
-        for epoch in range(epochs):
-            # run on all the data examples parsed by pytorch vision
-            for i, (images, labels) in enumerate(train_data):
-                # feed forward through the network
-                images = images.to(self.device)
-                labels = labels.to(self.device)
-                images = self.pre_model.return_resnet_output(images)
-                prediction_layer = self.forward(Layer(images, 0, net=self))
-                # calculate the loss
-                loss = self.mse_loss(prediction_layer.layer, labels)
 
-                # backpropagate through the network
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
-                # save data for plots
-                self.train_logger["loss"].append(loss.item())
+        # feed forward through the network
+        images = images.to(self.device)
+        images_processed = self.pre_model.return_resnet_output(images)
+        prediction_layer = self.forward(
+            Layer(images_processed, 0, net=self)).layer
+        # calculate the loss
+        prediction_layer = discriminator.forward(
+            Layer(torch.from_numpy(DataParser.reconstruct_image(
+                images, prediction_layer)).to(self.device), 0, net=self)).layer
 
-            print("epoch {0} avg loss is {1}".format(
-                epoch, np.mean(self.train_logger["loss"])))
-            # every epoch calculate the average loss
-            self.train_logger["cost"].append(np.mean(
-                self.train_logger["loss"]))
-            # zero out the losss
-            self.train_logger["loss"] = []
+        loss = self.bce_loss(prediction_layer,
+                             torch.zeros(prediction_layer.size()).to(self.device))
 
-            if test_data is not None:
-                self.test_model(test_data)
-        # add the number of epochs that were done
-       
-        self.train_logger["epochs"] = list(range(epochs))
-        self.test_logger["epochs"] = list(range(epochs))
-        # create a graph of the cost in respect to the epochs
-        self.cost_plot.draw_plot(self.train_logger, "train" + serial)
-        self.cost_plot.draw_plot(self.test_logger, "test" + serial)
-
-        # zero the loggers
-        self.train_logger["cost"] = []
-        self.test_logger["cost"] = []
+        # backpropagate through the network
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        # save data for plots
+        self.train_logger["loss"].append(loss.item())
 
     def forward(self, layer):
         """
@@ -234,10 +214,8 @@ class NeuralNetwork(nn.Module):
         if type(layer_params) is nn.Conv2d or type(layer_params) is \
                 nn.ConvTranspose2d:
             layer.calc_same_padding()
-
         # pass the data through
         calculated_layer = layer_params(layer.layer)
-
         # return the next layer in the network
         return Layer(layer_tensor=calculated_layer,
                      layer_number=layer.index + 1, net=self)
@@ -246,6 +224,25 @@ class NeuralNetwork(nn.Module):
     def mse_loss(prediction_layer, expected_output):
         loss_mse = nn.MSELoss()
         loss = loss_mse(prediction_layer, expected_output)
+        return loss
+
+    @staticmethod
+    def softmax_loss(prediction_layer, expected_output):
+        """
+        calculate the nll loss of the network
+        :param prediction_layer: the predication layer
+        :param expected_output: the loss of the model
+        :return:the loss
+        """
+        # softmax + log is better than performing the actions separately
+        loss_softmax = torch.nn.CrossEntropyLoss()
+        loss = loss_softmax(prediction_layer, expected_output)
+        return loss
+
+    @staticmethod
+    def bce_loss(prediction_layer, expected_output):
+        loss = nn.BCEWithLogitsLoss()
+        loss = loss(prediction_layer, expected_output)
         return loss
 
     def init_weights_liniar_conv(self, sizes):
@@ -272,6 +269,9 @@ class NeuralNetwork(nn.Module):
 
             if sizes[index][0] == "tanh":
                 self.weights.append(nn.Tanh())
+
+            if sizes[index][0] == "leaky":
+                self.weights.append(nn.LeakyReLU())
 
     def test_model(self, test_data, display_data=False):
         """
@@ -320,6 +320,53 @@ class NeuralNetwork(nn.Module):
             self.test_logger["loss"] = []
 
 
+class Discriminator(NeuralNetwork):
+    def __init__(
+            self, viz_tool, pre_model, learnin_rate, structure,
+            generator):
+        super(Discriminator, self).__init__(
+            viz_tool, pre_model, learnin_rate, structure)
+        self.generator = generator
+
+    def train_model(self, images, labels, discriminator=None):
+            images = images.to(self.device)
+            labels = labels.to(self.device)
+            gen_input = self.generator.pre_model.return_resnet_output(images)
+            fake_res = self.generator(Layer(gen_input, 0, net=self.generator)).\
+                layer
+            real_res = self.forward(Layer(torch.from_numpy(DataParser.reconstruct_image(
+                images, labels)).to(self.device), 0, net=self)).layer
+            x = torch.ones(real_res.size()).to(self.device)
+            print(x.size())
+            print(real_res.size())
+            self.optimizer.zero_grad()
+            loss_real = self.bce_loss(real_res, x)
+            loss_real.backward()
+            fake_res = self.forward(Layer(torch.from_numpy(DataParser.reconstruct_image(
+                images, fake_res)).to(self.device), 0, net=self)).layer
+            x = torch.zeros(fake_res.size()).to(self.device)
+            loss_fake = self.bce_loss(fake_res, x)
+            loss_fake.backward()
+
+            self.optimizer.step()
+
+
+class CombinedTraining(object):
+    def __init__(self, discriminator):
+        self.discriminator = discriminator
+
+    def super_train(self, epochs, train_loader, serial, test_data=None):
+        for epoch in range(epochs):
+            for i, (images, labels) in enumerate(train_loader):
+
+                # train the discriminator
+                self.discriminator.train_model(images, labels)
+
+                # train the generator
+                self.discriminator.generator.train_model(
+                    images, labels, discriminator=self.discriminator)
+
+
 def load_model(path, vis, layers):
     """
     loads the model from .ckpt file
@@ -329,7 +376,7 @@ def load_model(path, vis, layers):
     :return: loaded model
     """
     pre_model = PreTrainedModel()
-    model = NeuralNetwork(vis, layers, pre_model, 0.1, [
+    model = NeuralNetwork(vis, pre_model, 0.1, [
             ('conv', 128, 128, 3, 1),
             ('batchnorm', 128),
             ('relu', None),
@@ -358,8 +405,8 @@ def main(train_flag=True):
     # initialise data set
     train_loader, test_loader = DataParser.load_places_dataset(batch_size=16)
     if train_flag:
-        train_data.parse_data(train_loader, stopper=938)
-        test_data.parse_data(test_loader, stopper=130)
+        train_data.parse_data(train_loader, stopper=20)
+        test_data.parse_data(test_loader, stopper=10)
         # create, train and test the network
         create_new_network(vis, train_data, test_data,  layers=14, epochs=50)
     else:
@@ -382,7 +429,7 @@ def create_new_network(vis, train_loader, test_loader, layers, epochs):
     """
     print("started training")
     pre_model = PreTrainedModel()
-    model = NeuralNetwork(vis, layers, pre_model, 0.1, [
+    model = NeuralNetwork(vis, pre_model, 0.1, [
             ('conv', 128, 128, 3, 1),
             ('batchnorm', 128),
             ('relu', None),
@@ -392,17 +439,32 @@ def create_new_network(vis, train_loader, test_loader, layers, epochs):
             ('relu', None),
             ('conv', 64, 64, 3, 1),
             ('relu', None),
-            ('decoder', 2),  
+            ('decoder', 2),
             ('conv', 64, 32, 3, 1),
             ('tanh', None),
             ('conv', 32, 2, 3, 1),
             ('decoder', 2)])
-    model.train_model(epochs, train_loader, '1', test_loader)
-    model.test_model(test_loader, display_data=True)
-    torch.save(model.state_dict(), 'colorizer.ckpt')
-    return model
 
+    model2 = Discriminator(vis, None, 0.1, [('conv', 3, 64, 4, 2),
+                                            ('leaky', None),
+                                            ('conv', 64, 128, 4, 2),
+                                            ('batchnorm', 128),
+                                            ('leaky', None),
+                                            ('conv', 128, 256, 4, 2),
+                                            ('batchnorm', 256),
+                                            ('leaky', None),
+                                            ('conv', 256, 512, 4, 1),
+                                            ('batchnorm', 512),
+                                            ('leaky', None),
+                                            ('conv', 512, 1, 4, 1),
+                                            ], model)
+
+    trainer = CombinedTraining(model2)
+    trainer.super_train(10, train_loader, '1')
+
+    return model
 
 if __name__ == '__main__':
     # set train flag to false to load pre trained model
-    main(train_flag=False)
+    main(train_flag=True)
+
