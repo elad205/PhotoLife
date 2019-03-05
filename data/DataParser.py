@@ -43,7 +43,8 @@ class DataParser:
 
         # load training data
         train_loader = torch.utils.data.DataLoader(
-            dataset=train_dataset, batch_size=batch_size, shuffle=True)
+            dataset=train_dataset, batch_size=batch_size, shuffle=True,
+            num_workers=4)
 
         test_dataset = torchvision.datasets.CIFAR10(
             root='cifar10',
@@ -61,12 +62,12 @@ class DataParser:
 
         train_dataset = torchvision.datasets.ImageFolder(
             train_dir,
-            transforms.Compose([transforms.RandomResizedCrop(224),
+            transforms.Compose([transforms.RandomResizedCrop(256),
                                 transforms.RandomHorizontalFlip(),
                                 transforms.ToTensor()]))
         test_dataset = torchvision.datasets.ImageFolder(
             test_dir,
-            transforms.Compose([transforms.RandomResizedCrop(224),
+            transforms.Compose([transforms.RandomResizedCrop(256),
                                 transforms.RandomHorizontalFlip(),
                                 transforms.ToTensor()]))
 
@@ -77,6 +78,15 @@ class DataParser:
             dataset=test_dataset, batch_size=batch_size, shuffle=False)
 
         return train_loader, test_loader
+
+    @staticmethod
+    def create_loading_bar(data_loader, stopper):
+        prog = progressbar.ProgressBar(
+            widgets=['parsing data ', progressbar.SimpleProgress(), ' ',
+                     progressbar.ETA()],
+            max_value=len(
+                data_loader) * 16 if stopper is None else stopper * 16)
+        return prog
 
     def parse_data(self, data_loader, stopper=None):
         """
@@ -91,11 +101,7 @@ class DataParser:
         to the memory
         :return:
         """
-        prog = progressbar.ProgressBar(
-            widgets=['parsing data ', progressbar.SimpleProgress(), ' ',
-                     progressbar.ETA()],
-            max_value=len(
-                data_loader) * 16 if stopper is None else stopper * 16)
+        prog = self.create_loading_bar(data_loader, stopper=stopper)
 
         for i, (images, labels) in enumerate(data_loader):
             # used to get only a fraction of the dataset
@@ -111,7 +117,6 @@ class DataParser:
             lab_image = []
             for image in images:
                 lab_image.append(cv2.cvtColor(image, cv2.COLOR_RGB2LAB))
-
             lab_image = numpy.asarray(lab_image)
             # extract the features
             a_dim = lab_image.shape[0]
@@ -138,11 +143,47 @@ class DataParser:
 
         prog.finish()
 
-    def rgb_parse(self, data_loader):
-        for images in data_loader:
+    def rgb_parse(self, data_loader, stopper=None):
+        prog = self.create_loading_bar(data_loader, stopper)
+
+        for i, (images, _) in enumerate(data_loader):
+
+            if stopper is not None and i > stopper:
+                break
+
             images = images.numpy()
-            self.feature_list.append(cv2.cvtColor(images, cv2.COLOR_RGB2GRAY))
-            self.label_list.append(images)
+            images = images.transpose((0, 2, 3, 1))
+            gray_images = []
+            for image in images:
+                gray_images.append(cv2.cvtColor(image, cv2.COLOR_RGB2GRAY))
+
+            gray_images = numpy.asarray(gray_images)
+            a_dim = gray_images.shape[0]
+            b_dim = gray_images.shape[1]
+            c_dim = gray_images.shape[2]
+
+            gray_images = gray_images.reshape((a_dim, b_dim, c_dim, 1))
+            self.feature_list.append(
+                torch.from_numpy(gray_images.transpose((0, 3, 1, 2))))
+            self.label_list.append(torch.from_numpy(images.transpose(
+                0, 3, 1, 2)))
+            prog.update(i * a_dim)
+
+        prog.finish()
+
+    @staticmethod
+    def convert_to_lab(image_batch):
+        image_batch = image_batch.numpy()
+        image_batch = image_batch.transpose((0, 2, 3, 1))
+        lab_image = []
+        for image in image_batch:
+            lab_image.append(cv2.cvtColor(image, cv2.COLOR_RGB2Lab))
+        lab_image = numpy.asarray(lab_image)
+
+        lab_image[:, :, :, 0] /= 100
+        lab_image[:, :, :, 1:] /= 127
+
+        return lab_image.transpose((0, 3, 1, 2))
 
     @staticmethod
     def reconstruct_image(feature, result):
