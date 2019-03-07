@@ -62,13 +62,11 @@ class DataParser:
 
         train_dataset = torchvision.datasets.ImageFolder(
             train_dir,
-            transforms.Compose([transforms.RandomResizedCrop(256),
-                                transforms.RandomHorizontalFlip(),
+            transforms.Compose([transforms.CenterCrop(256),
                                 transforms.ToTensor()]))
         test_dataset = torchvision.datasets.ImageFolder(
             test_dir,
-            transforms.Compose([transforms.RandomResizedCrop(256),
-                                transforms.RandomHorizontalFlip(),
+            transforms.Compose([transforms.CenterCrop(256),
                                 transforms.ToTensor()]))
 
         train_loader = torch.utils.data.DataLoader(
@@ -172,16 +170,26 @@ class DataParser:
         prog.finish()
 
     @staticmethod
-    def convert_to_lab(image_batch):
+    def convert_to_lab(image_batch, opposite=True):
         image_batch = image_batch.numpy()
         image_batch = image_batch.transpose((0, 2, 3, 1))
         lab_image = []
-        for image in image_batch:
-            lab_image.append(cv2.cvtColor(image, cv2.COLOR_RGB2Lab))
-        lab_image = numpy.asarray(lab_image)
+        if not opposite:
+            image_batch[:, :, :, 0] += 1
+            image_batch[:, :, :, 0] *= 50
+            image_batch[:, :, :, 1:] *= 127
 
-        lab_image[:, :, :, 0] /= 100
-        lab_image[:, :, :, 1:] /= 127
+        for image in image_batch:
+            if opposite:
+                lab_image.append(cv2.cvtColor(image, cv2.COLOR_RGB2Lab))
+            else:
+                lab_image.append(cv2.cvtColor(image, cv2.COLOR_Lab2RGB))
+
+        lab_image = numpy.asarray(lab_image)
+        if opposite:
+            lab_image[:, :, :, 0] /= 50
+            lab_image[:, :, :, 0] -= 1
+            lab_image[:, :, :, 1:] /= 127
 
         return lab_image.transpose((0, 3, 1, 2))
 
