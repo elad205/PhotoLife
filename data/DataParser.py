@@ -44,7 +44,7 @@ class DataParser:
         # load training data
         train_loader = torch.utils.data.DataLoader(
             dataset=train_dataset, batch_size=batch_size, shuffle=True,
-            num_workers=4)
+            num_workers=8)
 
         test_dataset = torchvision.datasets.CIFAR10(
             root='cifar10',
@@ -57,23 +57,23 @@ class DataParser:
 
     @staticmethod
     def load_places_dataset(batch_size):
-        train_dir = r'D:\data_256'
-        test_dir = r'D:\data_test_256'
+        train_dir = r'C:\data_256'
+        test_dir = r'C:\data_test_256'
 
         train_dataset = torchvision.datasets.ImageFolder(
             train_dir,
-            transforms.Compose([transforms.CenterCrop(256),
-                                transforms.ToTensor()]))
+            transforms.Compose([transforms.ToTensor()]))
         test_dataset = torchvision.datasets.ImageFolder(
             test_dir,
-            transforms.Compose([transforms.CenterCrop(256),
-                                transforms.ToTensor()]))
+            transforms.Compose([transforms.ToTensor()]))
 
         train_loader = torch.utils.data.DataLoader(
-            dataset=train_dataset, batch_size=batch_size, shuffle=True)
+            dataset=train_dataset, batch_size=batch_size,
+            shuffle=True, num_workers=8, pin_memory=True)
 
         test_loader = torch.utils.data.DataLoader(
-            dataset=test_dataset, batch_size=batch_size, shuffle=False)
+            dataset=test_dataset, batch_size=batch_size, shuffle=False,
+            num_workers=4)
 
         return train_loader, test_loader
 
@@ -173,25 +173,38 @@ class DataParser:
     def convert_to_lab(image_batch, opposite=True):
         image_batch = image_batch.numpy()
         image_batch = image_batch.transpose((0, 2, 3, 1))
-        lab_image = []
+        lab_image = numpy.empty_like(image_batch)
+        gray_images = numpy.empty_like(image_batch[..., :1])
         if not opposite:
             image_batch[:, :, :, 0] += 1
             image_batch[:, :, :, 0] *= 50
             image_batch[:, :, :, 1:] *= 127
 
-        for image in image_batch:
+        for index in range(image_batch.shape[0]):
             if opposite:
-                lab_image.append(cv2.cvtColor(image, cv2.COLOR_RGB2Lab))
+                lab_image[index, :, :, :] = \
+                    cv2.cvtColor(image_batch[index], cv2.COLOR_RGB2Lab)
+                gray_images[index, :, :, 0] = \
+                    cv2.cvtColor(image_batch[index], cv2.COLOR_RGB2GRAY)
             else:
-                lab_image.append(cv2.cvtColor(image, cv2.COLOR_Lab2RGB))
+                lab_image[index, :, :, :] = cv2.cvtColor(
+                    image_batch[index], cv2.COLOR_Lab2RGB)
 
-        lab_image = numpy.asarray(lab_image)
+        if not opposite:
+            return lab_image.transpose((0, 3, 1, 2))
+
+        a_dim = gray_images.shape[0]
+        b_dim = gray_images.shape[1]
+        c_dim = gray_images.shape[2]
+
+        gray_images = gray_images.reshape((a_dim, b_dim, c_dim, 1))
         if opposite:
             lab_image[:, :, :, 0] /= 50
             lab_image[:, :, :, 0] -= 1
             lab_image[:, :, :, 1:] /= 127
 
-        return lab_image.transpose((0, 3, 1, 2))
+        return gray_images.transpose((0, 3, 1, 2)), lab_image.transpose(
+            (0, 3, 1, 2))
 
     @staticmethod
     def reconstruct_image(feature, result):
