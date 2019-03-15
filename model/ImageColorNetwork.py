@@ -156,7 +156,11 @@ class NeuralNetwork(nn.Module):
         self.init_weights_liniar_conv(structure)
 
         # create an optimizer for the network
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=3e-4)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=3e-4,
+                                          betas=(0, 0.999))
+
+        self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer,
+                                                                gamma=0.96)
 
         # create the plots for debugging
         self.cost_plot = Plot("epochs", "cost", self.viz)
@@ -174,9 +178,6 @@ class NeuralNetwork(nn.Module):
         """
 
         # feed forward through the network
-        images = images.to(self.device)
-        labels = torch.from_numpy(DataParser.convert_to_lab(labels))\
-            .to(self.device)
         prediction_layer = self.forward(
             Layer(images, 0, net=self), True).layer
         self.decoder_info.clear()
@@ -295,7 +296,7 @@ class NeuralNetwork(nn.Module):
             if sizes[index][0] == "leaky":
                 self.weights.append(nn.LeakyReLU(sizes[index][1]))
 
-    def test_model(self, test_data, display_data=False):
+    def test_model(self, test_data, images_per_epoch, display_data=False):
         """
         this function tests the model, it iterates on the testing data and
         feeds it to the network without backprop
@@ -307,22 +308,24 @@ class NeuralNetwork(nn.Module):
         viz_win_images = None
         viz_win_res = None
         with torch.no_grad():
-            for i, (images, labels) in enumerate(test_data):
+            for i, (images, _) in enumerate(test_data):
+                if (16 * i) >= images_per_epoch:
+                    break
+                images_gray, labels_lab = DataParser.convert_to_lab(images)
                 # display the images
                 if display_data:
-                    disp = labels
+                    disp = images
                     if viz_win_images is None:
                         viz_win_images = self.viz.images(disp)
                     else:
                         self.viz.images(disp, win=viz_win_images)
 
-                    images_copy = copy.copy(images)
 
                 # parse the images and labels
-                images = images.to(self.device)
-                labels = labels.to(self.device)
+                images_gray = torch.from_numpy(images_gray).to(self.device)
+                labels = torch.from_numpy(labels_lab).to(self.device)
                 # feed forward through the network
-                prediction_layer = self.forward(Layer(images, 0, net=self),
+                prediction_layer = self.forward(Layer(images_gray, 0, net=self),
                                                 True).\
                     layer
 
@@ -349,17 +352,13 @@ class Discriminator(NeuralNetwork):
             viz_tool, pre_model, learnin_rate, structure)
         self.generator = generator
         self.cost_plot_discrim = Plot("epochs", "cost", self.viz)
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=3e-4 / 10)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=3e-4 / 10,
+                                          betas=(0, 0.999))
         self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer,
-                                                                gamma=0.95)
+                                                                gamma=0.96)
 
     def train_model(self, images, labels, discriminator=None):
-            images = images.to(self.device)
-            labels = labels
-            processed = torch.from_numpy(
-                DataParser.convert_to_lab(labels)).to(self.device)
-
-            processed = torch.cat((processed, images), 1)
+            processed = torch.cat((labels, images), 1)
             real_res = self.forward(Layer(
                 processed, 0, net=self)).layer
             x = (torch.ones(real_res.size())).to(self.device)
@@ -389,13 +388,26 @@ class CombinedTraining(object):
     def __init__(self, discriminator):
         self.discriminator = discriminator
 
-    def super_train(self, epochs, train_loader, serial, test_data=None):
+    def super_train(self, epochs, train_loader, serial, images_per_epoch,
+                    test_data=None):
         for epoch in range(epochs):
 
-            if self.discriminator.scheduler.get_lr()[0] > 1e-6:
+            if self.discriminator.generator.scheduler.get_lr()[0] > 1e-6:
                 self.discriminator.scheduler.step()
+                self.discriminator.generator.scheduler.step()
 
-            for i, (images, labels) in enumerate(train_loader):
+            prog = DataParser.create_loading_bar(train_loader,
+                                                 images_per_epoch / 16)
+
+            for i, (images_rgb, _) in enumerate(train_loader):
+
+                if (16 * i) >= images_per_epoch:
+                    break
+
+                with torch.no_grad():
+                    images, labels = DataParser.convert_to_lab(images_rgb)
+                    images = torch.from_numpy(images).to(self.discriminator.device)
+                    labels = torch.from_numpy(labels).to(self.discriminator.device)
 
                 # train the discriminator
                 self.discriminator.train_model(images, labels)
@@ -404,6 +416,9 @@ class CombinedTraining(object):
                 self.discriminator.generator.train_model(
                     images, labels, discriminator=self.discriminator)
 
+                prog.update(i * 16)
+
+            prog.finish()
             print(
                 "epoch {0}\n avg loss of discriminator is {1}\n"
                 " avg loss of generator {2}".format(
@@ -422,7 +437,7 @@ class CombinedTraining(object):
             self.discriminator.generator.train_logger["loss"] = []
 
         if test_data is not None:
-            self.discriminator.generator.test_model(test_data, True)
+            self.discriminator.generator.test_model(test_data, 112, True)
             # add the number of epochs that were done
 
         self.discriminator.train_logger["epochs"] = list(range(epochs))
@@ -433,7 +448,7 @@ class CombinedTraining(object):
         self.discriminator.cost_plot.draw_plot(self.discriminator.train_logger, "train" + serial)
         self.discriminator.generator.cost_plot.draw_plot(self.discriminator.generator.train_logger, "train" + serial)
         #self.discriminator.cost_plot.draw_plot(self.discriminator.test_logger, "test" + serial)
-        self.discriminator.generator.cost_plot.draw_plot(self.discriminator.generator.test_logger, "test" + serial)
+        #self.discriminator.generator.cost_plot.draw_plot(self.discriminator.generator.test_logger, "test" + serial)
         # zero the loggers
         self.discriminator.train_logger["cost"] = []
         self.discriminator.generator.train_logger["cost"] = []
@@ -486,20 +501,15 @@ def main(train_flag=True):
     # connect to the visdom server
     vis = visdom.Visdom()
     print("make sure visdom server is activated")
-    train_data = DataParser()
-    test_data = DataParser()
+
     # initialise data set
     train_loader, test_loader = DataParser.load_places_dataset(batch_size=16)
-    if train_flag:
-        train_data.rgb_parse(train_loader, stopper=10)
-        test_data.rgb_parse(test_loader, stopper=10)
-        # create, train and test the network
-        create_new_network(vis, train_data, test_data,  layers=14, epochs=50)
-    else:
+    # create, train and test the network
+    gen = create_new_network(vis, train_loader, test_loader,  layers=14, epochs=50)
+    torch.save(gen.state_dict(), 'generator.ckpt')
+    if not train_flag:
         # load the model and test if
         model = load_model("colorizer.ckpt", vis, 14)
-        test_data.parse_data(test_loader, stopper=129)
-        model.test_model(test_data, display_data=True)
 
 
 def create_new_network(vis, train_loader, test_loader, layers, epochs):
@@ -565,7 +575,7 @@ def create_new_network(vis, train_loader, test_loader, layers, epochs):
                                             ], model)
 
     trainer = CombinedTraining(model2)
-    trainer.super_train(30, train_loader, '1', test_loader)
+    trainer.super_train(30, train_loader, '1', 1000, test_loader)
 
     return model
 
