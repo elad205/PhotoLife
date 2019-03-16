@@ -7,7 +7,7 @@
 }
 
 #middlePage{
-    height: 30vh;
+    height: 5vh;
     width: 100%;
     text-align: center;
     font-family: 'Lucida Sans', Arial, sans-serif;
@@ -37,12 +37,15 @@
     left: 0;
     top: 0;
     opacity: 0;
+    font-size: 100px;
 }
 
 #wrapper{
     text-align: center;
     position: relative;
     overflow: hidden;
+    display: inline-block;
+    width: 100%;
 }
 
 ul {
@@ -100,5 +103,4 @@ body{
     height: 5vh;
     font-family: "Arial";
     text-align: center;
-    margin-top: 2vh;
 }
