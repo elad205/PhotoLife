@@ -6,15 +6,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 
-<body>
-    <div id='topPage'>
-        <h1 id='title'>Photo Life</h1>
-        <div  id='middlePage'>
-                <span> please submit a black and white picture</span>
-                <p id='wrapper'>
-                    <input type="file">
-                </p>
+<body scroll="no" style="overflow: hidden">
+    <div id="container"></div>
+        <div id="taskBar">
+            <ul>
+            <li><a href="/"><img src="../static/Home.png" class="childIm" id="home"></a></li>
+            <li><a href="/"><img src="../static/Info.png" class="childIm" id="info"></a></li>
+            <li><a href="/"><img src="../static/Github.png" class="childIm" id="git"></a></li>
+            <li><img src="../static/photolifeWhite.png" id="logo" class="childIm"></li>
+            </ul>
         </div>
-    </div>
+        <div id="sep"></div>
+        <div id="mainImage">
+            <h1 id='title'><img src="../static/Logo.png" id="bigImage"></h1>
+        </div>
+            <div  id='middlePage'>
+                    <span> please submit a black and white picture</span>
+                <div id='wrapper'>
+                        <form action="http://127.0.0.1/upload:5000/" method="POST" enctype="multipart/form-data">
+                            <button id="uploader">Upload Image</button>
+                            <input type="file" name="image"  onchange="this.form.submit()">
+                        </form>
+                </div>    
+            </div>
 </body>
 </html>
