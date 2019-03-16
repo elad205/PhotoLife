@@ -12,7 +12,8 @@ class PageHandler(object):
     APP = Flask(__name__, template_folder='../frontend/templates',
                 static_folder='../frontend/static')
 
-    APP.config['UPLOAD_FOLDER'] = '../upload'
+    APP.config['UPLOAD_FOLDER'] = \
+        '/Users/elad/Desktop/final/FinalProject_ML/upload'
 
     def __init__(self):
         super(PageHandler, self).__init__()
@@ -26,7 +27,7 @@ class PageHandler(object):
         return flask.render_template('index.html')
 
     @staticmethod
-    @APP.route('/upload', methods=['GET', 'POST'])
+    @APP.route('/', methods=['GET', 'POST'])
     def upload_image():
         try:
             file = flask.request.files['image']
@@ -51,7 +52,7 @@ class PageHandler(object):
                filename.rsplit('.', 1)[1].lower() in PageHandler.ALLOWED_TYPES
 
     def run(self):
-        self.APP.run(debug=True, port=5000)
+        self.APP.run(debug=True, port=5001)
 
 
 def main():
