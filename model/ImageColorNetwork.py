@@ -3,7 +3,6 @@ import torch
 import visdom
 import torchvision.datasets.mnist
 import torchvision
-import copy
 from data.DataParser import DataParser
 from torch import nn
 
@@ -21,6 +20,20 @@ the program displays graphs and test data on a visdom server.
 note that in order to run the file you need to open a visdom server.
 the data set which is currently used is the places dataset.
 """
+
+
+class IterSetpScheduler(torch.optim.lr_scheduler._LRScheduler):
+    def __init__(self, optimizer, step_size, gamma=0.1, last_epoch=-1):
+        self.step_size = step_size
+        self.gamma = gamma
+        super(IterSetpScheduler, self).__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        return [base_lr * self.gamma ** (self.last_epoch / self.step_size)
+                for base_lr in self.base_lrs]
+
+    def update(self):
+        self.last_epoch += 1
 
 
 class PreTrainedModel(object):
@@ -157,10 +170,9 @@ class NeuralNetwork(nn.Module):
 
         # create an optimizer for the network
         self.optimizer = torch.optim.Adam(self.parameters(), lr=3e-4,
-                                          betas=(0, 0.999))
+                                          betas=(0.5, 0.999))
 
-        self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer,
-                                                                gamma=0.96)
+        self.scheduler = IterSetpScheduler(self.optimizer, 1e5, gamma=0.1)
 
         # create the plots for debugging
         self.cost_plot = Plot("epochs", "cost", self.viz)
@@ -205,6 +217,8 @@ class NeuralNetwork(nn.Module):
         this is the forward iteration of the network.
         this function is recursive and uses the create activated layer function
         :param layer: a layer object
+        :param encoder_flag: a flag which indicates if a u-net structure
+        is present.
         :return: the prediction layer
         """
         if layer.index == len(self.weights):
@@ -218,6 +232,8 @@ class NeuralNetwork(nn.Module):
         """
         creates activated layer using the relu function
         :param layer: layer objects
+        :param encoder_flag: a flag which indicates if a u-net structure
+        is present.
         :return: the next layer of the network a Layer object with the next
         index
         """
@@ -301,6 +317,8 @@ class NeuralNetwork(nn.Module):
         this function tests the model, it iterates on the testing data and
         feeds it to the network without backprop
         :param test_data: the testing data
+        :param images_per_epoch: to test on small batches of dataset this
+        param indicates how many images to iterate per epoch.
         :param display_data: wether or not the data will be displayed
         on the visdom server
         :return:
@@ -320,14 +338,12 @@ class NeuralNetwork(nn.Module):
                     else:
                         self.viz.images(disp, win=viz_win_images)
 
-
                 # parse the images and labels
                 images_gray = torch.from_numpy(images_gray).to(self.device)
                 labels = torch.from_numpy(labels_lab).to(self.device)
                 # feed forward through the network
-                prediction_layer = self.forward(Layer(images_gray, 0, net=self),
-                                                True).\
-                    layer
+                prediction_layer = self.forward(Layer(images_gray, 0, net=self
+                                                      ), True).layer
 
                 if display_data:
                     final = prediction_layer
@@ -353,15 +369,16 @@ class Discriminator(NeuralNetwork):
         self.generator = generator
         self.cost_plot_discrim = Plot("epochs", "cost", self.viz)
         self.optimizer = torch.optim.Adam(self.parameters(), lr=3e-4 / 10,
-                                          betas=(0, 0.999))
-        self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer,
-                                                                gamma=0.96)
+                                          betas=(0.5, 0.999))
+
+        self.scheduler = IterSetpScheduler(self.optimizer, 1e5)
 
     def train_model(self, images, labels, discriminator=None):
             processed = torch.cat((labels, images), 1)
             real_res = self.forward(Layer(
                 processed, 0, net=self)).layer
-            x = (torch.ones(real_res.size())).to(self.device)
+            x = torch.ones(real_res.size()) * 0.9
+            x = x.to(self.device)
             self.optimizer.zero_grad()
             loss_real = self.bce_loss(torch.squeeze(real_res),
                                       torch.squeeze(x))
@@ -375,7 +392,8 @@ class Discriminator(NeuralNetwork):
 
             fake_res = self.forward(Layer(fake_processed, 0, net=self)).layer
             x = torch.zeros(fake_res.size()).to(self.device)
-            loss_fake = self.bce_loss(torch.squeeze(fake_res), torch.squeeze(x))
+            loss_fake = self.bce_loss(torch.squeeze(fake_res), torch.squeeze(x)
+                                      )
             loss_fake.backward()
 
             self.optimizer.step()
@@ -392,22 +410,27 @@ class CombinedTraining(object):
                     test_data=None):
         for epoch in range(epochs):
 
+            prog = DataParser.create_loading_bar(train_loader,
+                                                 images_per_epoch / 16)
+
             if self.discriminator.generator.scheduler.get_lr()[0] > 1e-6:
                 self.discriminator.scheduler.step()
                 self.discriminator.generator.scheduler.step()
-
-            prog = DataParser.create_loading_bar(train_loader,
-                                                 images_per_epoch / 16)
 
             for i, (images_rgb, _) in enumerate(train_loader):
 
                 if (16 * i) >= images_per_epoch:
                     break
 
+                self.discriminator.generator.scheduler.update()
+                self.discriminator.scheduler.update()
+
                 with torch.no_grad():
                     images, labels = DataParser.convert_to_lab(images_rgb)
-                    images = torch.from_numpy(images).to(self.discriminator.device)
-                    labels = torch.from_numpy(labels).to(self.discriminator.device)
+                    images = torch.from_numpy(images).to(
+                        self.discriminator.device)
+                    labels = torch.from_numpy(labels).to(
+                        self.discriminator.device)
 
                 # train the discriminator
                 self.discriminator.train_model(images, labels)
@@ -441,14 +464,20 @@ class CombinedTraining(object):
             # add the number of epochs that were done
 
         self.discriminator.train_logger["epochs"] = list(range(epochs))
-        self.discriminator.generator.train_logger["epochs"] = list(range(epochs))
+        self.discriminator.generator.train_logger["epochs"] = \
+            list(range(epochs))
         self.discriminator.test_logger["epochs"] = list(range(epochs))
-        self.discriminator.generator.test_logger["epochs"] = list(range(epochs))
+        self.discriminator.generator.test_logger["epochs"] = \
+            list(range(epochs))
         # create a graph of the cost in respect to the epochs
-        self.discriminator.cost_plot.draw_plot(self.discriminator.train_logger, "train" + serial)
-        self.discriminator.generator.cost_plot.draw_plot(self.discriminator.generator.train_logger, "train" + serial)
-        #self.discriminator.cost_plot.draw_plot(self.discriminator.test_logger, "test" + serial)
-        #self.discriminator.generator.cost_plot.draw_plot(self.discriminator.generator.test_logger, "test" + serial)
+        self.discriminator.cost_plot.draw_plot(
+            self.discriminator.train_logger, "train" + serial)
+        self.discriminator.generator.cost_plot.draw_plot(
+            self.discriminator.generator.train_logger, "train" + serial)
+        # self.discriminator.cost_plot.draw_plot
+        # (self.discriminator.test_logger, "test" + serial)
+        # self.discriminator.generator.cost_plot.draw_plot(
+        # self.discriminator.generator.test_logger, "test" + serial)
         # zero the loggers
         self.discriminator.train_logger["cost"] = []
         self.discriminator.generator.train_logger["cost"] = []
@@ -456,12 +485,11 @@ class CombinedTraining(object):
         self.discriminator.generator.test_logger["cost"] = []
 
 
-def load_model(path, vis, layers):
+def load_model(path, vis):
     """
     loads the model from .ckpt file
     :param path: the path of the file
     :param vis: vis object to display data
-    :param layers: the number of layers of the network
     :return: loaded model
     """
     pre_model = PreTrainedModel()
@@ -505,22 +533,21 @@ def main(train_flag=True):
     # initialise data set
     train_loader, test_loader = DataParser.load_places_dataset(batch_size=16)
     # create, train and test the network
-    gen = create_new_network(vis, train_loader, test_loader,  layers=14, epochs=50)
+    gen = create_new_network(vis, train_loader, test_loader)
     torch.save(gen.state_dict(), 'generator.ckpt')
     if not train_flag:
         # load the model and test if
-        model = load_model("colorizer.ckpt", vis, 14)
+        model = load_model("colorizer.ckpt", vis)
+        return model
 
 
-def create_new_network(vis, train_loader, test_loader, layers, epochs):
+def create_new_network(vis, train_loader, test_loader):
     """
     this function initialise the network, trains it on the train data and
     the evaluation data, tests it on the test data and saves the weights.
     :param vis: the visdom server to display graphs
     :param train_loader: the training data
     :param test_loader: the testing data
-    :param layers: the number of layers in the model
-    :param epochs: the number epochs to perform
     :return: the model created
     """
     print("started training")
@@ -583,4 +610,3 @@ def create_new_network(vis, train_loader, test_loader, layers, epochs):
 if __name__ == '__main__':
     # set train flag to false to load pre trained model
     main(train_flag=True)
-
