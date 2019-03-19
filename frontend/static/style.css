@@ -1,26 +1,107 @@
-#topPage{
+#mainImage{
     width: 100%;
-    height: 10vh;
+    height: 55vh;
     text-align: center;
+    position: relative;
+    
 }
 
 #middlePage{
-    height: 20vh;
+    height: 5vh;
     width: 100%;
     text-align: center;
     font-family: 'Lucida Sans', Arial, sans-serif;
+    position: relative;
 }
 #title{
     font-size: 5vw;
     font-family: 'Trocchi';
     white-space: nowrap;
 }
+#taskBar{
+    width: 100%;
+    height: 9vh;
+    background-color: rgb(55, 46, 75);   
+}
+
+
+#taskBar a {
+    float: left;
+    padding: 6px;
+    text-align: center;
+    margin-left: 20px;
+}
+
+#wrapper input[type=file]{
+    position: absolute;
+    left: 0;
+    top: 0;
+    opacity: 0;
+    font-size: 100px;
+}
 
 #wrapper{
     text-align: center;
+    position: relative;
+    overflow: hidden;
+    display: inline-block;
+    width: 100%;
 }
+
+ul {
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+  }
+
+li {
+    display: inline;
+}
+
+.childIm{
+    height: 100%;
+    width: 5vh;
+}
+#git{
+    width: 12vh;
+}
+#info{
+    width: 9vh;
+}
+#home{
+    width: 6vh;
+}
+#taskBar a:hover{
+    background-color: rgb(25, 20, 36);
+}
+
 body{
-    background:#4cb8c4; /* fallback for old browsers */
-    background: -webkit-linear-gradient(to right, #4cb8c4, #3cd3ad); /* Chrome 10-25, Safari 5.1-6 */
-    background: linear-gradient(to right, #4cb8c4, #3cd3ad); /* W3C, IE 10+/ Edge, Firefox 16+, Chrome 26+, Opera 12+, Safari 7+ */
+    padding: 0;
+    margin: 0%;
+}
+
+#logo{
+    float: right;
+    width: 25vh;
+    margin-top: 2.5vh;
+    margin-right: 4vh;
+}
+
+#sep{
+    height: 1vh;
+    background-color: rgb(25, 20, 36);      
+}
+
+#bigImage{
+    width: 65vh;
+}
+
+#uploader{
+    border-radius: 10px;
+    background-color: rgb(55, 46, 75);
+    width: 12vw;
+    height: 5vh;
+    font-family: "Arial";
+    text-align: center;
+    font-size: 2vh;
 }
