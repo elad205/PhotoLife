@@ -5,6 +5,8 @@ import torchvision.datasets.mnist
 import torchvision
 from data.DataParser import DataParser
 from torch import nn
+import tqdm
+import cv2
 
 """
 File Name       :  ImageColorNetwork.py
@@ -170,9 +172,9 @@ class NeuralNetwork(nn.Module):
 
         # create an optimizer for the network
         self.optimizer = torch.optim.Adam(self.parameters(), lr=3e-4,
-                                          betas=(0.5, 0.999))
+                                          betas=(0, 0.999))
 
-        self.scheduler = IterSetpScheduler(self.optimizer, 1e5, gamma=0.1)
+        self.scheduler = IterSetpScheduler(self.optimizer, step_size=1e5)
 
         # create the plots for debugging
         self.cost_plot = Plot("epochs", "cost", self.viz)
@@ -182,7 +184,7 @@ class NeuralNetwork(nn.Module):
 
         self.decoder_info = {}
 
-    def train_model(self, images, labels, discriminator=None):
+    def train_model(self, images, labels, discriminator=None, prep_layer=None, retain_graph=False):
         """
         trains the model, this function takes the training data and preforms
         the feed forward, back propagation and the optimisation process
@@ -190,24 +192,36 @@ class NeuralNetwork(nn.Module):
         """
 
         # feed forward through the network
-        prediction_layer = self.forward(
-            Layer(images, 0, net=self), True).layer
+        if prep_layer is None:
+            prediction_layer = self.forward(
+                Layer(images, 0, net=self), True).layer
+        else:
+            prediction_layer = prep_layer
+
         self.decoder_info.clear()
+
         # calculate the loss
-        processed = torch.cat((prediction_layer, images), 1)
+        self.optimizer.zero_grad()
+
+        processed = torch.cat((images, prediction_layer), 1).to(self.device)
         decision_dis = discriminator.forward(
             Layer(processed, 0, net=discriminator)).layer
 
         x = torch.ones(decision_dis.size()).to(self.device)
+
         loss = self.bce_loss(torch.squeeze(decision_dis),
                              torch.squeeze(x))
 
-        l1_loss = self.l1_loss(prediction_layer, labels)
+        l1_loss = self.l1_loss(
+            prediction_layer.view(prediction_layer.size(0), -1),
+            labels.view(prediction_layer.size(0), -1))
 
         comb_loss = loss + 100 * l1_loss
+
         # backpropagate through the network
-        self.optimizer.zero_grad()
+
         comb_loss.backward()
+
         self.optimizer.step()
         # save data for plots
         self.train_logger["loss"].append(comb_loss.item())
@@ -248,6 +262,7 @@ class NeuralNetwork(nn.Module):
             layer.calc_same_padding()
         # pass the data through
         calculated_layer = layer_params(layer.layer)
+
         # return the next layer in the network
 
         if type(layer_params) is nn.LeakyReLU and encoder_flag:
@@ -255,8 +270,8 @@ class NeuralNetwork(nn.Module):
 
         if type(layer_params) is nn.ReLU and encoder_flag:
             calculated_layer = torch.cat(
-                (calculated_layer, self.decoder_info[
-                    calculated_layer.size()]), 1)
+                (self.decoder_info[
+                    calculated_layer.size()], calculated_layer), 1)
 
         return Layer(layer_tensor=calculated_layer,
                      layer_number=layer.index + 1, net=layer.net)
@@ -289,11 +304,17 @@ class NeuralNetwork(nn.Module):
                 self.weights.append(nn.Conv2d(
                     sizes[index][1], sizes[index][2],
                     sizes[index][3], stride=sizes[index][4]).to(self.device))
+                self.weights[-1].weight.data.normal_(
+                    0, np.sqrt(2. / sizes[index][1]), generator=
+                    torch.cuda.manual_seed(100))
 
             if sizes[index][0] == 'deconv':
                 self.weights.append(nn.ConvTranspose2d(
                     sizes[index][1], sizes[index][2],
                     sizes[index][3], stride=sizes[index][4]).to(self.device))
+                self.weights[-1].weight.data.normal_(
+                    0, np.sqrt(2. / sizes[index][1]),
+                    generator=torch.cuda.manual_seed(100))
 
             if sizes[index][0] == "decoder":
                 self.weights.append(nn.Upsample(
@@ -304,13 +325,14 @@ class NeuralNetwork(nn.Module):
                     .to(self.device)
 
             if sizes[index][0] == "relu":
-                self.weights.append(nn.ReLU())
+                self.weights.append(nn.ReLU()).to(self.device)
 
             if sizes[index][0] == "tanh":
-                self.weights.append(nn.Tanh())
+                self.weights.append(nn.Tanh()).to(self.device)
 
             if sizes[index][0] == "leaky":
-                self.weights.append(nn.LeakyReLU(sizes[index][1]))
+                self.weights.append(nn.LeakyReLU(sizes[index][1]))\
+                    .to(self.device)
 
     def test_model(self, test_data, images_per_epoch, display_data=False):
         """
@@ -325,6 +347,7 @@ class NeuralNetwork(nn.Module):
         """
         viz_win_images = None
         viz_win_res = None
+        self.eval()
         with torch.no_grad():
             for i, (images, _) in enumerate(test_data):
                 if (16 * i) >= images_per_epoch:
@@ -351,7 +374,8 @@ class NeuralNetwork(nn.Module):
                         viz_win_res = self.viz.images(
                             DataParser.convert_to_lab(final.cpu(), False))
                     else:
-                        self.viz.images(final, win=viz_win_res)
+                        self.viz.images(
+                            DataParser.convert_to_lab(final.cpu(), False), win=viz_win_res)
 
                 self.test_logger["loss"].append(self.mse_loss(
                     prediction_layer, labels).item())
@@ -368,38 +392,39 @@ class Discriminator(NeuralNetwork):
             viz_tool, pre_model, learnin_rate, structure)
         self.generator = generator
         self.cost_plot_discrim = Plot("epochs", "cost", self.viz)
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=3e-4 / 10,
-                                          betas=(0.5, 0.999))
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=3e-5,
+                                          betas=(0, 0.999))
 
-        self.scheduler = IterSetpScheduler(self.optimizer, 1e5)
+        self.scheduler = IterSetpScheduler(self.optimizer, step_size=1e5)
 
-    def train_model(self, images, labels, discriminator=None):
-            processed = torch.cat((labels, images), 1)
+    def train_model(self, images, labels, discriminator=None, prep_layer=None, retain_graph=False):
+            processed = torch.cat((images, labels), 1).to(self.device)
             real_res = self.forward(Layer(
                 processed, 0, net=self)).layer
-            x = torch.ones(real_res.size()) * 0.9
-            x = x.to(self.device)
+            x = torch.ones(real_res.size()).to(self.device) * 0.9
             self.optimizer.zero_grad()
             loss_real = self.bce_loss(torch.squeeze(real_res),
                                       torch.squeeze(x))
-            loss_real.backward()
+
             fake_res = self.generator(Layer(images, 0, net=self.generator),
                                       True). \
                 layer
             self.generator.decoder_info.clear()
 
-            fake_processed = torch.cat((fake_res, images), 1)
+            fake_processed = torch.cat((images, fake_res), 1).to(self.device)
 
-            fake_res = self.forward(Layer(fake_processed, 0, net=self)).layer
-            x = torch.zeros(fake_res.size()).to(self.device)
-            loss_fake = self.bce_loss(torch.squeeze(fake_res), torch.squeeze(x)
+            fake_res_dis = self.forward(Layer(fake_processed.detach(), 0, net=self)).layer
+            x = torch.zeros(fake_res_dis.size()).to(self.device)
+            loss_fake = self.bce_loss(torch.squeeze(fake_res_dis), torch.squeeze(x)
                                       )
-            loss_fake.backward()
+            (loss_fake + loss_real).backward()
 
             self.optimizer.step()
 
             self.train_logger["loss"].append(loss_fake.item()
                                              + loss_real.item())
+
+            return fake_res
 
 
 class CombinedTraining(object):
@@ -408,48 +433,45 @@ class CombinedTraining(object):
 
     def super_train(self, epochs, train_loader, serial, images_per_epoch,
                     test_data=None):
+
+        self.discriminator.train()
+        self.discriminator.generator.train()
         for epoch in range(epochs):
-
-            prog = DataParser.create_loading_bar(train_loader,
-                                                 images_per_epoch / 16)
-
             if self.discriminator.generator.scheduler.get_lr()[0] > 1e-6:
                 self.discriminator.scheduler.step()
                 self.discriminator.generator.scheduler.step()
 
-            for i, (images_rgb, _) in enumerate(train_loader):
-
-                if (16 * i) >= images_per_epoch:
+            pbar = tqdm.tqdm(total=images_per_epoch)
+            for i, (images, labels) in enumerate(train_loader):
+                if i * 10 > images_per_epoch:
                     break
 
-                self.discriminator.generator.scheduler.update()
-                self.discriminator.scheduler.update()
-
-                with torch.no_grad():
-                    images, labels = DataParser.convert_to_lab(images_rgb)
-                    images = torch.from_numpy(images).to(
-                        self.discriminator.device)
-                    labels = torch.from_numpy(labels).to(
-                        self.discriminator.device)
+                images = images.to(self.discriminator.device)
+                labels = labels.to(self.discriminator.device)
 
                 # train the discriminator
-                self.discriminator.train_model(images, labels)
+                gen_out = self.discriminator.train_model(images, labels)
 
                 # train the generator
+
+                self.discriminator.generator.train_model(
+                    images, labels, discriminator=self.discriminator,
+                    prep_layer=gen_out)
+
                 self.discriminator.generator.train_model(
                     images, labels, discriminator=self.discriminator)
 
-                prog.update(i * 16)
-
-            prog.finish()
-            print(
+                pbar.update(10)
+                self.discriminator.scheduler.update()
+                self.discriminator.generator.scheduler.update()
+            pbar.close()
+            tqdm.tqdm.write(
                 "epoch {0}\n avg loss of discriminator is {1}\n"
                 " avg loss of generator {2}".format(
                     epoch, np.mean(self.discriminator.train_logger["loss"]),
                     np.mean(
                         self.discriminator.generator.train_logger["loss"])))
             # every epoch calculate the average loss
-
             self.discriminator.train_logger["cost"].append(np.mean(
                 self.discriminator.train_logger["loss"]))
 
@@ -494,34 +516,54 @@ def load_model(path, vis):
     """
     pre_model = PreTrainedModel()
     model = NeuralNetwork(vis, pre_model, 0.1, [
-            ('conv', 1, 64, 3, 2),
+            ('conv', 1, 64, 4, 1),
             ('batchnorm', 64),
-            ('leaky', 0.1),
-            ('conv', 64, 128, 3, 2),
+            ('leaky', 0.2),
+            ('conv', 64, 64, 4, 2),
+            ('leaky', 0.2),
+            ('batchnorm', 64),
+            ('conv', 64, 128, 4, 2),
             ('batchnorm', 128),
-            ('leaky', 0.1),
-            ('conv', 128, 256, 3, 2),
+            ('leaky', 0.2),
+            ('conv', 128, 256, 4, 2),
             ('batchnorm', 256),
-            ('leaky', 0.1),
-            ('conv', 256, 512, 3, 2),
+            ('leaky', 0.2),
+            ('conv', 256, 512, 4, 2),
             ('batchnorm', 512),
-            ('leaky', None),
-            ('deconv', 512, 512, 3, 2),
+            ('leaky', 0.2),
+            ('conv', 512, 512, 4, 2),
+            ('batchnorm', 512),
+            ('leaky', 0.2),
+            ('conv', 512, 512, 4, 2),
+            ('batchnorm', 512),
+            ('leaky', 0.2),
+            ('conv', 512, 512, 4, 2),
+            ('batchnorm', 512),
+            ('leaky', 0.2),
+            ('deconv', 512, 512, 4, 2),
             ('batchnorm', 512),
             ('relu', None),
-            ('deconv', 512, 256, 3, 2),
+            ('deconv', 1024, 512, 4, 2),
+            ('batchnorm', 512),
+            ('relu', None),
+            ('deconv', 1024, 512, 4, 2),
+            ('batchnorm', 512),
+            ('relu', None),
+            ('deconv', 1024, 256, 4, 2),
             ('batchnorm', 256),
             ('relu', None),
-            ('deconv', 256, 128, 3, 2),
+            ('deconv', 512, 128, 4, 2),
             ('batchnorm', 128),
             ('relu', None),
-            ('deconv', 128, 64, 3, 2),
+            ('deconv', 256, 64, 4, 2),
             ('batchnorm', 64),
             ('relu', None),
-            ('deconv', 64, 3, 3, 2),
+            ('deconv', 128, 64, 4, 2),
+            ('batchnorm', 64),
+            ('relu', None),
+            ('conv', 128, 3, 1, 1),
             ('tanh', None)])
     model.load_state_dict(torch.load(path))
-    model.eval()
     return model
 
 
@@ -531,8 +573,20 @@ def main(train_flag=True):
     print("make sure visdom server is activated")
 
     # initialise data set
-    train_loader, test_loader = DataParser.load_places_dataset(batch_size=16)
+    train_loader, test_loader = DataParser.load_places_dataset(batch_size=10)
     # create, train and test the network
+    """
+    model = load_model("generator.ckpt", vis)
+    model.eval()
+    im_gray = cv2.imread('test2.jpg', cv2.IMREAD_GRAYSCALE)
+    im_gray = cv2.resize(im_gray, (256, 256))
+    im_gray = im_gray.reshape(1, 1, 256, 256).astype('float32') / 256.0
+    im_gray = torch.from_numpy(im_gray).to('cuda')
+    with torch.no_grad():
+        colored = model.forward(Layer(im_gray, 0, net=model),
+                                          True).layer
+        vis.image(DataParser.convert_to_lab(colored.cpu(), False)[0])
+    """
     gen = create_new_network(vis, train_loader, test_loader)
     torch.save(gen.state_dict(), 'generator.ckpt')
     if not train_flag:
@@ -557,37 +611,50 @@ def create_new_network(vis, train_loader, test_loader):
             ('leaky', 0.2),
             ('conv', 64, 64, 4, 2),
             ('leaky', 0.2),
+            ('batchnorm', 64),
             ('conv', 64, 128, 4, 2),
+            ('batchnorm', 128),
             ('leaky', 0.2),
             ('conv', 128, 256, 4, 2),
+            ('batchnorm', 256),
             ('leaky', 0.2),
             ('conv', 256, 512, 4, 2),
+            ('batchnorm', 512),
             ('leaky', 0.2),
             ('conv', 512, 512, 4, 2),
+            ('batchnorm', 512),
             ('leaky', 0.2),
             ('conv', 512, 512, 4, 2),
+            ('batchnorm', 512),
             ('leaky', 0.2),
             ('conv', 512, 512, 4, 2),
+            ('batchnorm', 512),
             ('leaky', 0.2),
             ('deconv', 512, 512, 4, 2),
+            ('batchnorm', 512),
             ('relu', None),
             ('deconv', 1024, 512, 4, 2),
+            ('batchnorm', 512),
             ('relu', None),
             ('deconv', 1024, 512, 4, 2),
+            ('batchnorm', 512),
             ('relu', None),
             ('deconv', 1024, 256, 4, 2),
+            ('batchnorm', 256),
             ('relu', None),
             ('deconv', 512, 128, 4, 2),
+            ('batchnorm', 128),
             ('relu', None),
             ('deconv', 256, 64, 4, 2),
+            ('batchnorm', 64),
             ('relu', None),
             ('deconv', 128, 64, 4, 2),
+            ('batchnorm', 64),
             ('relu', None),
             ('conv', 128, 3, 1, 1),
             ('tanh', None)])
 
     model2 = Discriminator(vis, None, 0.1, [('conv', 4, 64, 4, 2),
-                                            ('batchnorm', 64),
                                             ('leaky', 0.2),
                                             ('conv', 64, 128, 4, 2),
                                             ('batchnorm', 128),
@@ -602,9 +669,11 @@ def create_new_network(vis, train_loader, test_loader):
                                             ], model)
 
     trainer = CombinedTraining(model2)
-    trainer.super_train(30, train_loader, '1', 1000, test_loader)
+    trainer.super_train(10, train_loader, '1',  100000,
+                        test_loader)
 
     return model
+
 
 
 if __name__ == '__main__':
