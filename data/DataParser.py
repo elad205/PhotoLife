@@ -15,12 +15,10 @@ class PlacesDataSet(torchvision.datasets.ImageFolder):
         augment = transforms.Compose([transforms.RandomHorizontalFlip()])
         sample = augment(sample)
         sample = numpy.array(sample)
-        feature, label = DataParser.cvt_numpy_image(sample)
+        feature, label = DataParser.rgb_parse(sample)
         feature = self.transform(feature)
         label = self.transform(label)
-        sample = self.transform(sample)
-
-        return feature, label, sample
+        return feature, label
 
 
 class DataParser:
@@ -61,11 +59,11 @@ class DataParser:
 
         train_loader = torch.utils.data.DataLoader(
             dataset=train_dataset, batch_size=batch_size,
-            shuffle=True, num_workers=4, pin_memory=False)
+            shuffle=True, num_workers=2, pin_memory=True)
 
         test_loader = torch.utils.data.DataLoader(
             dataset=test_dataset, batch_size=batch_size, shuffle=False,
-            num_workers=4)
+            num_workers=1)
 
         return train_loader, test_loader
 
@@ -127,6 +125,22 @@ class DataParser:
         canvas[:, 1:, :, :] = ab_tensor
 
         return canvas
+
+    @staticmethod
+    def rgb_parse(image):
+        rgb_image = (image / 255.0).astype('float32')
+        gray_image = cv2.cvtColor(image.astype('float32'),
+                                  cv2.COLOR_RGB2GRAY) / 255.0
+        """
+        gray_image_3 = cv2.cvtColor(gray_image, cv2.COLOR_GRAY2RGB)
+
+        rgb_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2YUV)
+
+        gray_image_3 = cv2.cvtColor(gray_image_3, cv2.COLOR_RGB2YUV)
+        gray_image_3[:, :, 1:3] = rgb_image[:, :, 1:3]
+
+        """
+        return gray_image, rgb_image
 
 
 def main():

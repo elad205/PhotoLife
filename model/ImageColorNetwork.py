@@ -1,13 +1,14 @@
 import numpy as np
 from torch.nn.utils.spectral_norm import spectral_norm
-import visdom
 import torchvision.datasets.mnist
 import torchvision
-from data.DataParser import DataParser
 from torch import nn
 import tqdm
 import cv2
 import torch
+from torchvision import transforms
+import os
+import visdom
 """
 File Name       :  ImageColorNetwork.py
 Author:         :  Elad Cynamon
@@ -24,12 +25,122 @@ the data set which is currently used is the places dataset.
 """
 
 
+class PlacesDataSet(torchvision.datasets.ImageFolder):
+    def __init__(self, train_dir, transf):
+        super(PlacesDataSet, self).__init__(train_dir, transform=transf)
+
+    def __getitem__(self, index):
+        path = self.samples[index][0]
+        sample = self.loader(path)
+        augment = transforms.Compose([transforms.RandomHorizontalFlip()])
+        sample = augment(sample)
+        sample = np.array(sample)
+        feature, label = DataParser.rgb_parse(sample)
+        feature = self.transform(feature)
+        label = self.transform(label)
+        return feature, label
+
+
+class DataParser:
+    def __init__(self):
+        self.feature_list = []
+        self.label_list = []
+
+    def __next__(self):
+
+        # get to the next item
+        self.batch_counter += 1
+
+        # stop when iterated over all of the objects
+        if self.batch_counter == len(self.feature_list):
+            raise StopIteration
+
+        # return the images and labels
+        return self.feature_list[self.batch_counter], self.label_list[
+            self.batch_counter]
+
+    def __iter__(self):
+        # create a counter to index the lists
+        self.batch_counter = -1
+        return self
+
+    @staticmethod
+    def load_places_dataset(batch_size):
+        train_dir = r'C:\data_256'
+        test_dir = r'C:\data_test_256'
+
+        train_dataset = PlacesDataSet(
+            train_dir,
+            transforms.Compose([
+                transforms.ToTensor()]))
+        test_dataset = PlacesDataSet(
+            test_dir,
+            transforms.Compose([transforms.ToTensor()]))
+
+        train_loader = torch.utils.data.DataLoader(
+            dataset=train_dataset, batch_size=batch_size,
+            shuffle=True, num_workers=2, pin_memory=True)
+
+        test_loader = torch.utils.data.DataLoader(
+            dataset=test_dataset, batch_size=batch_size, shuffle=False,
+            num_workers=1)
+
+        return train_loader, test_loader
+
+    @staticmethod
+    def rgb_parse(image):
+        rgb_image = (image / 255.0).astype('float32')
+
+        gray_image = cv2.cvtColor(image.astype('float32'),
+                                  cv2.COLOR_RGB2GRAY) / 255.0
+
+        return gray_image.reshape( gray_image.shape[0],
+                                  gray_image.shape[1], 1), rgb_image
+
+    @staticmethod
+    def convert_to_lab(image_batch, opposite=True):
+        image_batch = image_batch.numpy()
+        image_batch = image_batch.transpose((0, 2, 3, 1))
+        lab_image = np.empty_like(image_batch)
+        gray_images = np.empty_like(image_batch[..., :1])
+        if not opposite:
+            image_batch[:, :, :, 0] += 1
+            image_batch[:, :, :, 0] *= 50
+            image_batch[:, :, :, 1:] *= 127
+
+        for index in range(image_batch.shape[0]):
+            if opposite:
+                lab_image[index, :, :, :] = \
+                    cv2.cvtColor(image_batch[index], cv2.COLOR_RGB2Lab)
+                gray_images[index, :, :, 0] = \
+                    cv2.cvtColor(image_batch[index], cv2.COLOR_RGB2GRAY)
+            else:
+                lab_image[index, :, :, :] = cv2.cvtColor(
+                    image_batch[index], cv2.COLOR_Lab2RGB)
+
+        if not opposite:
+            return lab_image.transpose((0, 3, 1, 2))
+
+        a_dim = gray_images.shape[0]
+        b_dim = gray_images.shape[1]
+        c_dim = gray_images.shape[2]
+
+        gray_images = gray_images.reshape((a_dim, b_dim, c_dim, 1))
+        if opposite:
+            lab_image[:, :, :, 0] /= 50
+            lab_image[:, :, :, 0] -= 1
+            lab_image[:, :, :, 1:] /= 127
+
+        return gray_images.transpose((0, 3, 1, 2)), lab_image.transpose(
+            (0, 3, 1, 2))
+
+
 class SelfAttention(nn.Module):
     def __init__(self, in_channel: int, gain: int = 1):
         super().__init__()
-        self.query = self._spectral_init(nn.Conv1d(in_channel, in_channel // 8, 1), gain=gain).to('cuda')
-        self.key = self._spectral_init(nn.Conv1d(in_channel, in_channel // 8, 1), gain=gain).to('cuda')
-        self.value = self._spectral_init(nn.Conv1d(in_channel, in_channel, 1), gain=gain).to('cuda')
+        self.query = self._spectral_init(nn.Conv1d(in_channel, in_channel // 8, 1), gain=gain)
+        self.key = self._spectral_init(nn.Conv1d(in_channel, in_channel // 8, 1), gain=gain)
+        self.value = self._spectral_init(nn.Conv1d(in_channel, in_channel, 1), gain=gain)
         self.gamma = nn.Parameter(torch.tensor(0.0)).to('cuda')
 
     @staticmethod
@@ -65,7 +176,7 @@ class Vgg16(nn.Module):
         self.blocks = []
         self.vgg_pre_trained.eval()
         for i in range(4):
-            self.blocks.append(nn.Sequential().to(self.device))
+            self.blocks.append(nn.Sequential())
 
         for i in range(4):
             self.blocks[0].add_module(str(i), self.vgg_pre_trained[i])
@@ -84,11 +195,6 @@ class Vgg16(nn.Module):
 
     def forward(self, image):
         with torch.no_grad():
-            if type(image) is not torch.Tensor:
-                image = torch.from_numpy(image).to(self.device)
-            else:
-                image = image.to(self.device)
-
             outputs = []
             out = image
             for block in self.blocks:
@@ -124,20 +230,19 @@ class PreTrainedModel(nn.Module):
         this function loads the resnet model and changes its input to fit
         black and white images.
         """
-        self.modified_res_net = torchvision.models.resnet34(pretrained=True).\
-            to('cuda')
-        self.modified_res_net.conv1.weight =  \
-            torch.nn.Parameter(self.modified_res_net.conv1.weight.sum(dim=1).
-                               unsqueeze(1).data)
+        with torch.no_grad():
+            self.modified_res_net = torchvision.models.resnet34(pretrained=True)
+            self.modified_res_net.eval()
+            self.modified_res_net.conv1.weight =  \
+                torch.nn.Parameter(self.modified_res_net.conv1.weight.sum(dim=1).
+                                   unsqueeze(1).data)
+            self.proccesed_features = \
+                torch.nn.Sequential(*list(self.modified_res_net.children())[0:8]).to('cuda')
 
-        self.proccesed_features = \
-            torch.nn.Sequential(*list(self.modified_res_net.children())[0:8])
+            self.long_skip_data = {}
 
-        self.long_skip_data = {}
-        self.proccesed_features.eval()
-
-        for param in self.parameters():
-            param.requires_grad = False
+            for param in self.parameters():
+                param.requires_grad = False
 
     def forward(self, bw_image):
         """
@@ -199,10 +304,11 @@ class Layer:
     this class represents a layer in the network, it contains the
     layer tensor and the place of the layer in the network
     """
-    def __init__(self, layer_tensor, layer_number, net):
+    def __init__(self, layer_tensor, layer_number, net, cat=False):
         self.layer = layer_tensor
         self.index = layer_number
         self.net = net
+        self.cat = cat
         try:
             # give the input layer of the linear layer which comes after
             # the conv layer
@@ -233,10 +339,21 @@ class Layer:
                 self.layer, [0, int(True), 0, int(True)])
         self.net.weights[self.index].padding = (padding // 2, padding // 2)
 
+    @staticmethod
+    def icnr(x, scale=2, init=nn.init.kaiming_normal_):
+        "ICNR init of `x`, with `scale` and `init` function."
+        ni, nf, h, w = x.shape
+        ni2 = int(ni / (scale ** 2))
+        k = init(torch.zeros([ni2, nf, h, w])).transpose(0, 1)
+        k = k.contiguous().view(ni2, nf, -1)
+        k = k.repeat(1, 1, scale ** 2)
+        k = k.contiguous().view([nf, ni, h, w]).transpose(0, 1)
+        x.data.copy_(k)
+
 
 class NeuralNetwork(nn.Module):
     def __init__(self, viz_tool, pre_model, learnin_rate,
-                 structure):
+                 structure, flag = False):
         """
         initialize the network variables
         :param viz_tool: visdom object to display plots
@@ -259,13 +376,13 @@ class NeuralNetwork(nn.Module):
         # this is a spacial list of the weights, it acts like a normal
         # list but it contains autograd objects
         self.weights = torch.nn.ModuleList()
-        self.decode_wights = nn.ModuleList()
+        self.decode_wights = torch.nn.ModuleList()
 
         # initiate the weights
         self.init_weights_liniar_conv(structure)
 
         # create an optimizer for the network
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=3e-4,
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=1e-3,
                                           betas=(0, 0.999))
 
         self.scheduler = IterSetpScheduler(self.optimizer, step_size=1e5)
@@ -277,12 +394,12 @@ class NeuralNetwork(nn.Module):
         self.pre_model = pre_model
 
         self.decoder_info = {}
-
-        self.vgg_network = Vgg16()
+        if flag:
+            self.vgg_network = Vgg16()
 
         self.decode_index = 0
 
-    def train_model(self, images, labels, rgb_image, discriminator=None, prep_layer=None, retain_graph=False):
+    def train_model(self, images, labels, discriminator=None, prep_layer=None, retain_graph=False):
         """
         trains the model, this function takes the training data and preforms
         the feed forward, back propagation and the optimisation process
@@ -290,7 +407,7 @@ class NeuralNetwork(nn.Module):
         """
         # feed forward through the network
         if prep_layer is None:
-            middle_input = self.pre_model.forward(images).to(self.device)
+            middle_input = self.pre_model.forward(images)
             self.decoder_info = self.pre_model.long_skip_data
             prediction_layer = self.forward(
                 Layer(middle_input, 0, net=self), decoder_flag=True).layer
@@ -299,21 +416,23 @@ class NeuralNetwork(nn.Module):
             prediction_layer = prep_layer
 
         self.decoder_info.clear()
-        rgb_image.to(self.device)
         # calculate the loss\
-        fake_processed = torch.cat((images, prediction_layer), 1).to(self.device)
-        decision_dis = discriminator.forward(
-            Layer(fake_processed, 0, net=discriminator)).layer
+        if discriminator:
+            decision_dis = discriminator.forward(
+                Layer(prediction_layer, 0, net=discriminator)).layer
 
-        loss = - decision_dis.mean()
+            loss = - decision_dis.mean()
+        else:
+            loss = 0
 
-        c_loss = self.content_loss(prediction_layer, rgb_image.to(self.device), labels)
+        c_loss = self.content_loss(prediction_layer, labels)
 
         comb_loss = loss + c_loss
         # backpropagate through the network
 
         self.optimizer.zero_grad()
-        discriminator.optimizer.zero_grad()
+        if discriminator:
+            discriminator.optimizer.zero_grad()
         comb_loss.backward()
 
         self.optimizer.step()
@@ -360,23 +479,32 @@ class NeuralNetwork(nn.Module):
                 nn.ConvTranspose2d:
             layer.calc_same_padding()
         # pass the data through
-        calculated_layer = layer_params(layer.layer)
+
         # return the next layer in the network
 
+        if type(layer_params) is nn.ReLU and decoder_flag and layer.cat:
+            try:
+                self.contact_unet(layer)
+            except KeyError:
+               pass
+
+        calculated_layer = layer_params(layer.layer)
         if type(layer_params) is nn.LeakyReLU and encoder_flag:
             self.decoder_info[calculated_layer.size()] = calculated_layer
 
-        if type(layer_params) is nn.ReLU and decoder_flag:
-            try:
-                calculated_layer = torch.cat(
-                    (self.decode_wights[self.decode_index](self.decoder_info[
-                        calculated_layer.size()]), calculated_layer), 1)
-                self.decode_index += 1
-            except KeyError:
-                pass
+        if type(self.weights[layer.index]) is nn.AvgPool2d or type(self.weights[layer.index]) is nn.PixelShuffle :
+            return Layer(layer_tensor=calculated_layer,
+                     layer_number=layer.index + 1, net=layer.net, cat=True)
 
         return Layer(layer_tensor=calculated_layer,
                      layer_number=layer.index + 1, net=layer.net)
+
+    def contact_unet(self, layer):
+        decoder_functions = self.decode_wights[self.decode_index]
+        encoder_info = self.decoder_info[layer.layer.size()]
+        layer.layer = torch.cat((
+            layer.layer, decoder_functions(encoder_info)), dim=1)
+        self.decode_index += 1
 
     @staticmethod
     def mse_loss(prediction_layer, expected_output):
@@ -396,17 +524,14 @@ class NeuralNetwork(nn.Module):
         loss = loss(prediction_layer, expected_output)
         return loss
 
-    def content_loss(self, prediction_layer, expected_output, lab_image):
-        prediction_layer.to(self.device)
-        expected_output.to(self.device)
+    def content_loss(self, prediction_layer, expected_output):
         x_pred = self.vgg_network.forward(prediction_layer)[:3]
         target_pred = self.vgg_network.forward(expected_output)[:3]
-        base_loss = [self.l1_loss(prediction_layer, expected_output) / 100]
-        wgts = [0.2, 0.7, 0.1]
-        base_loss += [self.l1_loss(
-            f.view(f.size(0), -1), t.view(f.size(0), -1))
-                      * w for f, t, w in zip(x_pred, target_pred, wgts)]
-        return sum(base_loss) * 100
+        base_loss = [self.l1_loss(prediction_layer, expected_output)]
+        wgts = [20, 70, 10]
+        base_loss += [self.l1_loss(f, t) * w
+                      for f, t, w in zip(x_pred, target_pred, wgts)]
+        return sum(base_loss)
 
     def init_weights_liniar_conv(self, sizes):
         for index in range(self.network_layers):
@@ -429,17 +554,14 @@ class NeuralNetwork(nn.Module):
                     sizes[index][1], sizes[index][2] * 4,
                     sizes[index][3], stride=sizes[index][4]).to(self.device)))
 
-                self.weights.append(nn.PixelShuffle(2))
+                self.decode_wights.append(
+                    spectral_norm(nn.Conv2d(
+                        sizes[index][2], sizes[index][2], kernel_size=1,
+                        stride=1))
+                        .to(self.device))
 
-                self.decode_wights.append(spectral_norm(nn.Conv2d(
-                    sizes[index][2], sizes[index][2], kernel_size=1, stride=1))
-                                          .to(self.device))
-
-                """"
-                self.weights[-1].weight.data.normal_(
-                    0, np.sqrt(2. / sizes[index][1]),
-                    generator=torch.cuda.manual_seed(100))
-                """
+            if sizes[index][0] == 'shuffle':
+                self.weights.append(nn.PixelShuffle(2).to(self.device))
 
             if sizes[index][0] == "decoder":
                 self.weights.append(nn.Upsample(
@@ -460,10 +582,15 @@ class NeuralNetwork(nn.Module):
                     .to(self.device)
 
             if sizes[index][0] == "selfAtt":
-                self.weights.append(SelfAttention(sizes[index][1])).to(self.device)
+                self.weights.append(SelfAttention(sizes[index][1]))
 
             if sizes[index][0] == "dropout":
-                self.weights.append(nn.Dropout2d(sizes[index][1]))
+                self.weights.append(nn.Dropout2d(sizes[index][1]).to(self.device))
+
+            if sizes[index][0] == "blur":
+                self.weights.append(nn.ReplicationPad2d((1, 0, 1, 0)))
+
+                self.weights.append(nn.AvgPool2d(2, stride=1))
 
     def test_model(self, test_data, images_per_epoch, display_data=False):
         """
@@ -480,10 +607,9 @@ class NeuralNetwork(nn.Module):
         viz_win_res = None
         self.eval()
         with torch.no_grad():
-            for i, (images, _) in enumerate(test_data):
+            for i, (images, labels) in enumerate(test_data):
                 if (16 * i) >= images_per_epoch:
                     break
-                images_gray, labels_lab = DataParser.convert_to_lab(images)
                 # display the images
                 if display_data:
                     disp = images
@@ -493,10 +619,9 @@ class NeuralNetwork(nn.Module):
                         self.viz.images(disp, win=viz_win_images)
 
                 # parse the images and labels
-                images_gray = torch.from_numpy(images_gray).to(self.device)
-                labels = torch.from_numpy(labels_lab).to(self.device)
                 # feed forward through the network
-                middle_input = self.pre_model.forward(images_gray).to(
+                images = images.to(self.device)
+                middle_input = self.pre_model.forward(images).to(
                     self.device)
                 self.decoder_info = self.pre_model.long_skip_data
                 prediction_layer = self.forward(
@@ -510,7 +635,7 @@ class NeuralNetwork(nn.Module):
                     else:
                         self.viz.images(
                             final.cpu().numpy(), win=viz_win_res)
-
+                labels = labels.to(self.device)
                 self.test_logger["loss"].append(self.mse_loss(
                     prediction_layer, labels).item())
 
@@ -519,9 +644,9 @@ class NeuralNetwork(nn.Module):
 
     def eval_model(self):
         self.eval()
-        im_gray = cv2.imread('test3.jpg', cv2.IMREAD_GRAYSCALE)
+        im_gray = cv2.imread('test4.jpg', cv2.IMREAD_GRAYSCALE)
         im_gray = cv2.resize(im_gray, (256, 256))
-        im_gray = im_gray.reshape(1, 1, 256, 256).astype('float32') / 256.0
+        im_gray = im_gray.reshape(1, 1, 256, 256).astype('float32') / 255.0
         im_gray = torch.from_numpy(im_gray).to('cuda')
         with torch.no_grad():
             middle_input = self.pre_model.forward(im_gray).to(
@@ -545,20 +670,15 @@ class Discriminator(NeuralNetwork):
 
         self.scheduler = IterSetpScheduler(self.optimizer, step_size=1e5)
 
-    def train_model(self, images, labels, rgb_image=None, discriminator=None, prep_layer=None, retain_graph=False):
-            rgb_image = rgb_image.to(self.device)
-            images = images.to(self.device)
-            processed = torch.cat((images, rgb_image), 1).to(self.device)
-            real_res = self.forward(Layer(processed.to(self.device), 0, net=self)).layer
+    def train_model(self, images, labels, discriminator=None, prep_layer=None, retain_graph=False):
+            real_res = self.forward(Layer(labels, 0, net=self)).layer
             loss_real = nn.ReLU()(1.0 - real_res).mean()
-            middle_input = self.generator.pre_model.forward(images).to(self.device)
+            middle_input = self.generator.pre_model.forward(images)
             self.generator.decoder_info = self.generator.pre_model.long_skip_data
             fake_res = self.generator.forward(
                 Layer(middle_input, 0, net=self.generator), decoder_flag=True).layer
             self.generator.decoder_info.clear()
-            fake_processed = torch.cat((images, fake_res), 1).to(self.device)
-
-            fake_res_dis = self.forward(Layer(fake_processed, 0, net=self)).layer
+            fake_res_dis = self.forward(Layer(fake_res, 0, net=self)).layer
             loss_fake = nn.ReLU()(1.0 + fake_res_dis).mean()
 
             tot_loss = loss_real + loss_fake
@@ -579,46 +699,34 @@ class CombinedTraining(object):
         self.discriminator = discriminator
 
     def super_train(self, epochs, train_loader, serial, images_per_epoch,
-                    test_data=None):
+                    training_func, test_data=None, decay_lr = False):
 
         self.discriminator.train()
         self.discriminator.generator.train()
         for epoch in range(epochs):
 
             pbar = tqdm.tqdm(total=images_per_epoch)
-            for i, (images, labels, rgb_image) in enumerate(train_loader):
+            for i, (images, labels) in enumerate(train_loader):
                 if i * 5 > images_per_epoch:
                     break
 
                 images = images.to(self.discriminator.device)
                 labels = labels.to(self.discriminator.device)
-
                 # train the discriminator
-                gen_out = self.discriminator.train_model(images, labels,
-                                                         rgb_image=rgb_image)
 
-                # train the generator
-
-                self.discriminator.generator.train_model(
-                    images, labels, rgb_image, discriminator=self.discriminator,
-                    prep_layer=gen_out)
-
-                self.discriminator.generator.train_model(
-                    images, labels, rgb_image, discriminator=self.discriminator)
+                training_func(images, labels)
 
                 pbar.update(5)
 
-                if epoch < 3:
+                if epoch < 3 and decay_lr:
                     self.discriminator.scheduler.step()
                     self.discriminator.generator.scheduler.step()
 
-                self.discriminator.scheduler.update()
-                self.discriminator.generator.scheduler.update()
             pbar.close()
             tqdm.tqdm.write(
                 "epoch {0}\n avg loss of discriminator is {1}\n"
                 " avg loss of generator {2}".format(
-                    epoch, np.mean(self.discriminator.train_logger["loss"]),
+                    epoch,  np.mean(self.discriminator.train_logger["loss"]) if np.mean(self.discriminator.train_logger["loss"]) is not None else 0,
                     np.mean(
                         self.discriminator.generator.train_logger["loss"])))
             # every epoch calculate the average loss
@@ -642,15 +750,40 @@ class CombinedTraining(object):
         self.discriminator.generator.test_logger["epochs"] = \
             list(range(epochs))
         # create a graph of the cost in respect to the epochs
+        """"
         self.discriminator.cost_plot.draw_plot(
             self.discriminator.train_logger, "train" + serial)
+    
         self.discriminator.generator.cost_plot.draw_plot(
             self.discriminator.generator.train_logger, "train" + serial)
+        """
         # zero the loggers
         self.discriminator.train_logger["cost"] = []
         self.discriminator.generator.train_logger["cost"] = []
         self.discriminator.test_logger["cost"] = []
         self.discriminator.generator.test_logger["cost"] = []
+
+    def gan_train(self, images, labels):
+        gen_out = self.discriminator.train_model(images, labels)
+        # train the generator
+
+        self.discriminator.generator.train_model(
+            images, labels, discriminator=self.discriminator,
+            prep_layer=gen_out)
+
+        self.discriminator.generator.train_model(
+            images, labels, discriminator=self.discriminator)
+
+    def sgenerator_train(self, images, labels):
+        self.discriminator.generator.train_model(
+            images, labels)
+
+    def adjust_lr(self, new_lr_gen, new_lr_dis):
+        for param_group in self.discriminator.generator.optimizer.param_groups:
+            param_group['lr'] = new_lr_gen
+
+        for param_group in self.discriminator.optimizer.param_groups:
+            param_group['lr'] = new_lr_dis
 
 
 def load_model(path, vis):
@@ -669,12 +802,21 @@ def main(train_flag=True):
     # connect to the visdom server
     vis = visdom.Visdom()
     print("make sure visdom server is activated")
-
     # initialise data set
     train_loader, test_loader = DataParser.load_places_dataset(batch_size=5)
     # create, train and test the network
-    gen = create_new_network(vis, train_loader, test_loader)
-    torch.save(gen.state_dict(), 'generator.ckpt')
+    gen, dis = create_new_network(vis, train_loader, test_loader)
+    torch.save(gen.state_dict(), 'gen.ckpt')
+    """"
+    with open(os.path.join(os.environ['SM_MODEL_DIR'], "colorizer.ckpt"),
+              'wb') as f:
+        torch.save(gen.state_dict(), f)
+
+    with open(os.path.join(os.environ['SM_MODEL_DIR'], "critic.ckpt"),
+              'wb') as f:
+        torch.save(dis.state_dict(), f)
+    
+    """
     if not train_flag:
         # load the model and test if
         model = load_model("colorizer.ckpt", vis)
@@ -693,26 +835,32 @@ def create_new_network(vis, train_loader, test_loader):
     print("started training")
     pre_model = PreTrainedModel()
     model = NeuralNetwork(vis, pre_model, 0.1, [
+            ('relu', None),
+            ('batchnorm', 512),
             ('deconv', 512, 256, 3, 1),
+            ('shuffle', None),
             ('relu', None),
             ('batchnorm', 512),
             ('deconv', 512, 128, 3, 1),
+            ('shuffle', None),
             ('relu', None),
             ('batchnorm', 256),
             ('selfAtt', 256),
             ('deconv', 256, 64, 3, 1),
+            ('shuffle', None),
             ('relu', None),
             ('batchnorm', 128),
             ('deconv', 128, 64, 3, 1),
+            ('shuffle', None),
             ('relu', None),
             ('batchnorm', 128),
             ('deconv', 128, 32, 3, 1),
+            ('shuffle', None),
             ('relu', None),
-            ('batchnorm', 32),
             ('conv', 32, 3, 1, 1),
-            ('tanh', None)])
+            ('tanh', None)], flag=True)
 
-    model2 = Discriminator(vis, None, 0.1, [('conv', 4, 128, 4, 2),
+    model2 = Discriminator(vis, None, 0.1, [('conv', 3, 128, 4, 2),
                                             ('leaky', 0.2),
                                             ('dropout', 0.2),
                                             ('conv', 128, 128, 3, 1),
@@ -729,14 +877,16 @@ def create_new_network(vis, train_loader, test_loader):
                                             ('leaky', 0.2),
                                             ('conv', 1024, 1, 4, 1)
                                             ], model)
-
-    model.load_state_dict(torch.load("generator.ckpt"))
-    model.test_model(test_loader, 600, True)
     trainer = CombinedTraining(model2)
-    trainer.super_train(10, train_loader, '1', 5000,
-                        test_loader)
+    """
+    model.load_state_dict(torch.load("0505.ckpt"))
+    model.test_model(test_loader, 200, True)
+    """
+    trainer.super_train(10, train_loader, '2', 5000, trainer.sgenerator_train, test_loader)
+    trainer.adjust_lr(3e-4, 3e-5)
+    trainer.super_train(20, train_loader, '1', 5000, trainer.gan_train, test_data=test_loader, decay_lr=True)
 
-    return model
+    return model, model2
 
 
 if __name__ == '__main__':
