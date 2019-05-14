@@ -128,7 +128,7 @@ class SelfAttention(nn.Module):
         taken from the fastai library
         """
         super().__init__()
-        self.device = 'cuda'
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.query = self._spectral_init(
             nn.Conv1d(in_channel, in_channel // 8, 1))
         self.key = self._spectral_init(

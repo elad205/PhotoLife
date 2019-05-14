@@ -13,7 +13,7 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
-POSSIBLE_MODES = ("eval", "test", "train")
+POSSIBLE_MODES = ("eval", "test", "train", "standby")
 
 
 def get_mode(arg):
@@ -25,13 +25,17 @@ def get_mode(arg):
 
 
 def check_paths(paths):
-    print(paths)
     for path in paths:
-        if not os.path.exists(path):
-            raise argparse.ArgumentTypeError(
-                "path doesnt exist, please check if your path exists")
-
+        check_path(path)
     return paths
+
+
+def check_path(path):
+    if not os.path.exists(path):
+        raise argparse.ArgumentTypeError(
+            "path doesnt exist, please check if your path exists")
+
+    return path
 
 
 def get_args():
@@ -53,7 +57,9 @@ def get_args():
     parser.add_argument('--checkpoint', '-c', type=str, default="")
     parser.add_argument('--beta0', type=int, default=0)
     parser.add_argument('--save_weights', type=str2bool, default=True)
-    parser.add_argument("--eval_images", nargs="+", default=None)
+    parser.add_argument("--eval_images", nargs="+", default=None,
+                        type=check_paths)
+    parser.add_argument("--save_loc", type=str, default="")
 
     args = parser.parse_args()
     return args

@@ -107,8 +107,8 @@ class DataParser:
                 arr.append(cv2.imread(path, cv2.IMREAD_GRAYSCALE))
             except cv2.error:
                 print(
-                    "an error accured while opening the images,"
-                    " please check the valdity of the images", file=sys.stderr)
+                    "an error accrued while opening the images,"
+                    " please check the validity of the images", file=sys.stderr)
                 exit(-1)
 
             arr[-1] = cv2.resize(arr[-1], (256, 256)).reshape((1, 256, 256))
