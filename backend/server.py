@@ -1,14 +1,16 @@
 from flask import Flask
 import flask
 from werkzeug.utils import secure_filename
-from werkzeug.exceptions import abort, BadRequestKeyError
+from werkzeug.exceptions import BadRequestKeyError
 import os
 import subprocess
 import imghdr
-import threading
+import random
+import time
 
-
-SAVE_LOC = "/home/elad/PhotoLife/FinalProject_ML/backend/colored"
+SAVE_LOC = "../frontend/static/colored"
+MAX_SIZE = 50
+CHECK_POINT = "../pre trained/0505.ckpt"
 
 
 class Singleton(type):
@@ -24,19 +26,13 @@ class Singleton(type):
 class Generator(object, metaclass=Singleton):
     def __init__(self):
         super(Generator, self).__init__()
-        print(os.path.exists(SAVE_LOC))
-        self.generator = subprocess.Popen(["python3", "../model/src/main.py",
-                                           "standby", str(1), "--save_loc" ,SAVE_LOC],
-                                          stdin=subprocess.PIPE)
-
-        self.checker = threading.Thread(target=self.check_for_crashes)
-        self.checker.daemon = True
-        self.checker.start()
-
-    def check_for_crashes(self):
-        while True:
-            if self.generator.poll() is not None:
-                exit(1)
+        self.generator = subprocess.Popen(["python",
+                                           f"..{os.path.sep}model{os.path.sep}"
+                                           f"src{os.path.sep}main.py",
+                                           "standby", str(1), "--save_loc",
+                                           SAVE_LOC, "--checkpoint",
+                                           CHECK_POINT], stdin=subprocess.PIPE,
+                                          stderr=subprocess.PIPE)
 
 
 gen = Generator()
@@ -49,7 +45,7 @@ class PageHandler(object):
     APP = Flask(__name__, template_folder='../frontend/templates',
                 static_folder='../frontend/static')
 
-    APP.config['UPLOAD_FOLDER'] = 'uploads'
+    APP.config['UPLOAD_FOLDER'] = '../frontend/static/uploads'
 
     def __init__(self):
         super(PageHandler, self).__init__()
@@ -74,21 +70,35 @@ class PageHandler(object):
             # if user does not select file, browser also
             # submit an empty part without filename
             if file.filename == '':
-                return flask.redirect(flask.request.url)
+                return flask.redirect("error.html")
             if file and PageHandler.allowed_file(file.filename):
                 filename = secure_filename(file.filename)
-                file_path = os.path.join(PageHandler.APP.config['UPLOAD_FOLDER'],
-                                       filename)
+                filename = filename.split(".")
+                filename[0] += str(random.randint(0, 100000))
+                filename = ".".join(filename)
+                file_path = os.path.join(PageHandler.APP.
+                                         config['UPLOAD_FOLDER'], filename)
                 file.save(file_path)
                 if imghdr.what(file_path) is not None:
-                    res = gen.generator.communicate(file_path.encode())[0]
-                    if res.returncode == -1:
+                    os.write(gen.generator.stdin.fileno(),
+                             (file_path + "?" * (50-len(file_path))).
+                             encode('ascii'))
+                    res = os.read(gen.generator.stderr.fileno(), 4096).\
+                        decode('ascii')
+                    timeout = time.time() + 10
+                    if res == "0":
                         return flask.redirect("/")
+                    while res not in file_path:
+                        res = os.read(gen.generator.stderr.fileno(),
+                                      4096).decode('ascii')
+                        if time.time() > timeout:
+                            return flask.redirect("error.html")
                     else:
-                        return flask.send_file(SAVE_LOC + os.sep + filename)
+                        return flask.render_template("result.html",
+                                                     filename="colored/" +
+                                                              filename)
 
-                return flask.redirect(flask.url_for('upload_image',
-                                                    filename=filename))
+            return flask.render_template("error.html")
         except BadRequestKeyError:
             return flask.redirect(flask.request.url)
 
