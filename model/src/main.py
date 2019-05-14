@@ -5,6 +5,10 @@ from colorization.networks import GeneratorDecoder, Discriminator
 from colorization.trainer import CombinedTraining
 from colorization.args import get_args
 import sys
+import os
+import threading
+import  queue
+
 
 GEN_STRCUT = [('relu', None),
               ('decoderBlock', 512, 256, 3, 1),
@@ -30,6 +34,13 @@ DISCRIMINATOR_STRUCT = [('convBlock', 3, 128, 4, 2, 0.2, 0.2),
                         ('conv', 1024, 1, 4, 1)
                         ]
 
+def read_stdin(queue_):
+    while True:
+        for line in sys.stdin.readlines():
+            if os.path.exists(line):
+                queue_.put(line)
+            else:
+                print("invalid", file=sys.stderr)
 
 def main(args):
     # connect to the visdom server
@@ -46,6 +57,21 @@ def main(args):
         except FileNotFoundError and KeyError:
             print(f"invalid checkpoint: {args.checkpoint}")
             exit(-1)
+
+    if args.mode == "standby":
+        queue_ = queue.Queue()
+        input_files = []
+        lisnter = threading.Thread(target=read_stdin, args=(queue_, ))
+        lisnter.daemon = True
+        lisnter.start()
+        while True:
+            while not queue_.empty() and len(input_files) < 5:
+                input_files.append(queue_.get(block=False))
+
+            if input_files:
+                print(input_files)
+                gen.eval_model(input_files)
+                input_files = []
 
     if args.mode == "train":
         # initialise data set

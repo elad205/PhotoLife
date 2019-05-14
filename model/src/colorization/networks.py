@@ -6,7 +6,8 @@ from colorization.layers import Layer, LayerTypes
 import numpy as np
 from colorization.loss import Loss
 from colorization.DataParser import DataParser
-from torchvision import transforms
+import re
+
 
 def no_grad(func):
     def do_no_grad(*args, **kwargs):
@@ -19,10 +20,10 @@ def no_grad(func):
 class Vgg16(nn.Module):
 
     @no_grad
-    def __init__(self):
+    def __init__(self, device):
         super(Vgg16, self).__init__()
 
-        self.device = 'cuda'
+        self.device = device
         self.vgg_pre_trained = torchvision.models.vgg16(
             pretrained=True).features.to(self.device)
         self.blocks = []
@@ -59,12 +60,13 @@ class Vgg16(nn.Module):
 class ResNetEncoder(nn.Module):
 
     @no_grad
-    def __init__(self):
+    def __init__(self, device):
         super(ResNetEncoder, self).__init__()
         """
         this function loads the resnet model and changes its input to fit
         black and white images.
         """
+        self.device = device
         self.modified_res_net = torchvision.models.resnet34(
             pretrained=True)
         self.modified_res_net.eval()
@@ -74,7 +76,7 @@ class ResNetEncoder(nn.Module):
                     .unsqueeze(1).data)
         self.proccesed_features = \
             torch.nn.Sequential(*list(
-                self.modified_res_net.children())[0:8]).to('cuda')
+                self.modified_res_net.children())[0:8]).to(self.device)
 
         self.long_skip_data = {}
 
@@ -108,9 +110,9 @@ class GeneratorDecoder(NeuralNetwork):
             viz_tool, learning_rate, structure, optimizer)
 
         self.decode_wights = torch.nn.ModuleList()
-        self.pre_model = ResNetEncoder()
+        self.pre_model = ResNetEncoder(self.device)
         self.decoder_info = {}
-        self.vgg_network = Vgg16()
+        self.vgg_network = Vgg16(self.device)
         self.decode_index = 0
         self.decoder_used = None
 
@@ -269,12 +271,18 @@ class GeneratorDecoder(NeuralNetwork):
         return prediction_layer
 
     @no_grad
-    def eval_model(self, imgs):
+    def eval_model(self, imgs, save_img=""):
         self.eval()
         arrays_images = DataParser.load_images(imgs)
         im_gray = torch.from_numpy(arrays_images).to(self.device)
         colored = self.feed_forward_generator(im_gray)
-        self.viz.images(colored.cpu())
+        if self.viz:
+            self.viz.images(colored.cpu())
+        if save_img != "":
+            pat = re.compile("/.*")
+            for img, name in zip(colored.cpu(), imgs):
+                torchvision.utils.save_image(
+                    img.cpu(), save_img + "/" + pat.match(name))
 
 
 class Discriminator(NeuralNetwork):
