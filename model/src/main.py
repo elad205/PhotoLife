@@ -7,7 +7,7 @@ from colorization.args import get_args
 import sys
 import os
 import threading
-import  queue
+import queue
 
 
 GEN_STRCUT = [('relu', None),
@@ -34,17 +34,20 @@ DISCRIMINATOR_STRUCT = [('convBlock', 3, 128, 4, 2, 0.2, 0.2),
                         ('conv', 1024, 1, 4, 1)
                         ]
 
+
 def read_stdin(queue_):
     while True:
-        for line in sys.stdin.readlines():
-            if os.path.exists(line):
-                queue_.put(line)
-            else:
-                print("invalid", file=sys.stderr)
+        msg = os.read(sys.stdin.fileno(), 50)
+        msg = msg.decode('ascii')
+        msg = msg.replace("?", "")
+        if os.path.exists(msg):
+            queue_.put(msg)
+        else:
+            print("invalid")
+
 
 def main(args):
     # connect to the visdom server
-
     if args.visdom:
         vis = visdom.Visdom(args.host, port=args.port)
     else:
@@ -61,16 +64,17 @@ def main(args):
     if args.mode == "standby":
         queue_ = queue.Queue()
         input_files = []
+
         lisnter = threading.Thread(target=read_stdin, args=(queue_, ))
         lisnter.daemon = True
         lisnter.start()
+
         while True:
             while not queue_.empty() and len(input_files) < 5:
                 input_files.append(queue_.get(block=False))
 
             if input_files:
-                print(input_files)
-                gen.eval_model(input_files)
+                gen.eval_model(input_files, args.save_loc)
                 input_files = []
 
     if args.mode == "train":

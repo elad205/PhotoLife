@@ -59,7 +59,7 @@ def get_args():
     parser.add_argument('--save_weights', type=str2bool, default=True)
     parser.add_argument("--eval_images", nargs="+", default=None,
                         type=check_paths)
-    parser.add_argument("--save_loc", type=str, default="")
+    parser.add_argument("--save_loc", type=check_path, default="")
 
     args = parser.parse_args()
     return args

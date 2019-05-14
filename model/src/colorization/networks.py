@@ -6,8 +6,8 @@ from colorization.layers import Layer, LayerTypes
 import numpy as np
 from colorization.loss import Loss
 from colorization.DataParser import DataParser
-import re
-
+import os
+import sys
 
 def no_grad(func):
     def do_no_grad(*args, **kwargs):
@@ -279,10 +279,15 @@ class GeneratorDecoder(NeuralNetwork):
         if self.viz:
             self.viz.images(colored.cpu())
         if save_img != "":
-            pat = re.compile("/.*")
             for img, name in zip(colored.cpu(), imgs):
-                torchvision.utils.save_image(
-                    img.cpu(), save_img + "/" + pat.match(name))
+                name = os.path.basename(name)
+                try:
+                    torchvision.utils.save_image(
+                        img.cpu(), save_img + "\\" + name)
+                    print(name, file=sys.stderr)
+                except KeyError:
+                    print("not saved")
+                    print("0", file=sys.stderr)
 
 
 class Discriminator(NeuralNetwork):
