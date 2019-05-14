@@ -18,10 +18,10 @@
         </div>
         <div id="sep"></div>
         <div id="mainImage">
-            <h1 id='title'><img src="../static/error.svg" id="midImage"></h1>
+            <h1 id='title'><img src={{ url_for('static', filename=filename)}} id="midImage"></h1>
         </div>
             <div  id='middlePage'>
-                    <span> An error accrued, please try again later</span>
+                    <span> Here is your colored image</span>
             </div>
 </body>
 </html>
