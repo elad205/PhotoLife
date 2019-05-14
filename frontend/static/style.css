@@ -96,6 +96,10 @@ body{
     width: 65vh;
 }
 
+#midImage{
+    width: 50vh;
+}
+
 #uploader{
     border-radius: 10px;
     background-color: rgb(55, 46, 75);
