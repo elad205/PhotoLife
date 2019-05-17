@@ -7,6 +7,7 @@ import subprocess
 import imghdr
 import random
 import time
+import cv2
 
 SAVE_LOC = "../frontend/static/colored"
 MAX_SIZE = 50
@@ -79,6 +80,9 @@ class PageHandler(object):
                 file_path = os.path.join(PageHandler.APP.
                                          config['UPLOAD_FOLDER'], filename)
                 file.save(file_path)
+                im = cv2.imread(file_path, cv2.IMREAD_COLOR)
+                im = cv2.resize(im, (256, 256))
+                cv2.imwrite(file_path, im)
                 if imghdr.what(file_path) is not None:
                     os.write(gen.generator.stdin.fileno(),
                              (file_path + "?" * (50-len(file_path))).encode())
