@@ -10,7 +10,7 @@ import time
 
 SAVE_LOC = "../frontend/static/colored"
 MAX_SIZE = 50
-CHECK_POINT = "../pre trained/0505.ckpt"
+CHECK_POINT = "../pre trained/gen.ckpt"
 
 
 class Singleton(type):
@@ -81,22 +81,22 @@ class PageHandler(object):
                 file.save(file_path)
                 if imghdr.what(file_path) is not None:
                     os.write(gen.generator.stdin.fileno(),
-                             (file_path + "?" * (50-len(file_path))).
-                             encode('ascii'))
+                             (file_path + "?" * (50-len(file_path))).encode())
                     res = os.read(gen.generator.stderr.fileno(), 4096).\
-                        decode('ascii')
+                        decode()
                     timeout = time.time() + 10
                     if res == "0":
                         return flask.redirect("/")
                     while res not in file_path:
                         res = os.read(gen.generator.stderr.fileno(),
-                                      4096).decode('ascii')
+                                      4096).decode()
                         if time.time() > timeout:
                             return flask.redirect("error.html")
                     else:
-                        return flask.render_template("result.html",
-                                                     filename="colored/" +
-                                                              filename)
+                        return flask.render_template(
+                            "result.html",
+                            filename="colored/" + filename,
+                            filename2="uploads/" + filename)
 
             return flask.render_template("error.html")
         except BadRequestKeyError:

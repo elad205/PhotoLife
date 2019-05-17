@@ -4,6 +4,8 @@
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style.css') }}">
     <title>Photo Life</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.knightlab.com/libs/juxtapose/latest/js/juxtapose.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.knightlab.com/libs/juxtapose/latest/css/juxtapose.css">
 </head>
 
 <body scroll="no" style="overflow: hidden">
@@ -12,14 +14,19 @@
             <ul>
             <li><a href="/"><img src="../static/Home.png" class="childIm" id="home"></a></li>
             <li><a href="/"><img src="../static/Info.png" class="childIm" id="info"></a></li>
-            <li><a href="/"><img src="../static/Github.png" class="childIm" id="git"></a></li>
+            <li><a href="https://github.com/elad205"><img src="../static/Github.png" class="childIm" id="git"></a></li>
             <li><img src="../static/photolifeWhite.png" id="logo" class="childIm"></li>
             </ul>
         </div>
         <div id="sep"></div>
-        <div id="mainImage">
-            <h1 id='title'><img src={{ url_for('static', filename=filename)}} id="midImage"></h1>
+        <div id="mainImage"  class="juxtapose"  style="height: 555px;width: 555px;text-align: center;margin: auto; padding-top: 10vh;">
+            <h1 id='title'><img src={{ url_for('static', filename=filename)}} id="midImage">
+            <img src={{ url_for('static', filename=filename2)}} id="midImage"></h1>
+
         </div>
+    <script src="https://cdn.knightlab.com/libs/juxtapose/latest/js/juxtapose.min.js"></script>
+        <link rel="stylesheet" href="https://cdn.knightlab.com/libs/juxtapose/latest/css/juxtapose.css">
+
             <div  id='middlePage'>
                     <span> Here is your colored image</span>
             </div>

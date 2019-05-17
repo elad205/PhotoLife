@@ -1,20 +1,21 @@
 import visdom
 import torch
-from colorization.DataParser import DataParser
-from colorization.networks import GeneratorDecoder, Discriminator
-from colorization.trainer import CombinedTraining
-from colorization.args import get_args
+from DataParser import DataParser
+from networks import GeneratorDecoder, Discriminator
+from trainer import CombinedTraining
+from args import get_args
 import sys
 import os
 import threading
 import queue
 
 
-GEN_STRCUT = [('relu', None),
+GEN_STRCUT = [('batchnorm', 0, 256),
+              ('relu', None),
               ('decoderBlock', 512, 256, 3, 1),
               ('decoderBlock', 512, 128, 3, 1),
-              ('selfAtt', 256),
               ('decoderBlock', 256, 64, 3, 1),
+              ('selfAtt', 128),
               ('decoderBlock', 128, 64, 3, 1),
               ('deconv', 128, 32, 3, 1),
               ('shuffle', None),
@@ -38,7 +39,8 @@ DISCRIMINATOR_STRUCT = [('convBlock', 3, 128, 4, 2, 0.2, 0.2),
 def read_stdin(queue_):
     while True:
         msg = os.read(sys.stdin.fileno(), 50)
-        msg = msg.decode('ascii')
+        print(msg)
+        msg = msg.decode()
         msg = msg.replace("?", "")
         if os.path.exists(msg):
             queue_.put(msg)
@@ -48,6 +50,7 @@ def read_stdin(queue_):
 
 def main(args):
     # connect to the visdom server
+    print("aaaaaaaaaaa")
     if args.visdom:
         vis = visdom.Visdom(args.host, port=args.port)
     else:
@@ -85,8 +88,14 @@ def main(args):
         trainer_init(train_loader, dis, gen, args)
 
         if args.save_weights:
-            torch.save(gen.state_dict(), 'gen.ckpt')
-            torch.save(dis.state_dict(), 'dis.ckpt')
+            with open(
+                    os.path.join(os.environ['SM_MODEL_DIR'], "colorizer.ckpt"),
+                    'wb') as f:
+                torch.save(gen.state_dict(), f)
+
+            with open(os.path.join(os.environ['SM_MODEL_DIR'], "critic.ckpt"),
+                      'wb') as f:
+                torch.save(dis.state_dict(), f)
 
     elif args.mode == "eval":
         if args.eval_images is None:
