@@ -8,9 +8,8 @@ import sys
 
 
 class PlacesDataSet(torchvision.datasets.ImageFolder):
-    def __init__(self, train_dir, transf, norm=True):
+    def __init__(self, train_dir, transf):
         super(PlacesDataSet, self).__init__(train_dir, transform=transf)
-        self.norm = norm
 
     def __getitem__(self, index):
         path = self.samples[index][0]
@@ -59,7 +58,7 @@ class DataParser:
         test_dataset = PlacesDataSet(
             test_dir,
             transforms.Compose([
-                transforms.ToTensor()]), norm=True)
+                transforms.ToTensor()]))
 
         test_loader = torch.utils.data.DataLoader(
             dataset=test_dataset, batch_size=batch_size, shuffle=False,
