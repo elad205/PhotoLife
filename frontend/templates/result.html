@@ -19,7 +19,7 @@
             </ul>
         </div>
         <div id="sep"></div>
-        <div id="mainImage"  class="juxtapose"  style="height: 555px;width: 555px;text-align: center;margin: auto; padding-top: 10vh;">
+        <div id="mainImage"  class="juxtapose"  style="height: 40vh;width: 40vh;text-align: center;margin: auto; padding-top: 10vh; position: relative;">
             <h1 id='title'><img src={{ url_for('static', filename=filename)}} id="midImage">
             <img src={{ url_for('static', filename=filename2)}} id="midImage"></h1>
 
@@ -28,7 +28,8 @@
         <link rel="stylesheet" href="https://cdn.knightlab.com/libs/juxtapose/latest/css/juxtapose.css">
 
             <div  id='middlePage'>
-                    <span> Here is your colored image</span>
+                    <p style="font-size: 3vh" > Here is your colored image</p>
+                <a href={{ url_for('static', filename=filename)}} download style="font-size: 3vh" > download image </a>
             </div>
 </body>
 </html>
