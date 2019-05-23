@@ -38,7 +38,7 @@ DISCRIMINATOR_STRUCT = [('convBlock', 3, 128, 4, 2, 0.2, 0.2),
 
 def read_stdin(queue_):
     while True:
-        msg = os.read(sys.stdin.fileno(), 50)
+        msg = os.read(sys.stdin.fileno(), 1024)
         msg = msg.decode()
         msg = msg.replace("?", "")
         if os.path.exists(msg):
