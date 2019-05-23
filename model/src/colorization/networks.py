@@ -9,6 +9,7 @@ from colorization.DataParser import DataParser
 import os
 import sys
 
+
 def no_grad(func):
     def do_no_grad(*args, **kwargs):
         with torch.no_grad():
@@ -147,38 +148,35 @@ class GeneratorDecoder(NeuralNetwork):
 
     def create_activated_layer(self, layer):
         """
-        creates activated layer using the relu function
+        creates the new layer in the network
         :param layer: layer objects
-        is present.
         :return: the next layer of the network a Layer object with the next
-        index
+        index and if needed a flag for copy and concat the next layer
         """
         # create the layer of the model
-        # perform the activation function on every neuron [relu]
-        # the last layer has to be with negative values so we use tanh
-
         layer_params = self.weights[layer.index]
+
         # perform same padding on conv layers
         if type(layer_params) is nn.Conv2d or type(layer_params) is \
                 nn.ConvTranspose2d:
             layer.calc_same_padding()
-        # pass the data through
 
-        # return the next layer in the network
-
+        # copy and concat before activation
         if type(layer_params) is nn.ReLU and layer.cat:
             try:
                 self.concat_unet(layer)
             except KeyError:
                 pass
 
+        # get the next layer of the network
         calculated_layer = layer_params(layer.layer)
 
-        if type(self.weights[layer.index]) is nn.AvgPool2d or type(
-                self.weights[layer.index]) is nn.PixelShuffle:
+        # after sub pixel convolution copy and concat
+        if type(layer_params) is nn.PixelShuffle:
             return Layer(layer_tensor=calculated_layer,
                          layer_number=layer.index + 1, net=layer.net, cat=True)
 
+        # return the next layer
         return Layer(layer_tensor=calculated_layer,
                      layer_number=layer.index + 1, net=layer.net)
 
@@ -225,40 +223,55 @@ class GeneratorDecoder(NeuralNetwork):
         self.test_logger["cost"].append(np.mean(self.test_logger["loss"]))
         self.test_logger["loss"] = []
 
-    def train_model(self, images, labels, extra_net):
+    def train_model(self, images: torch.Tensor, labels: torch.Tensor,
+                    extra_net):
         """
         trains the model, this function takes the training data and preforms
-        the feed forward, back propagation and the optimisation process
-        :return:
+        the feed forward, back propagation and the optimisation process.
+        In this function we implement the gans training scheme, we feed forward
+        through the generator and then get what the discriminator thinks about
+        the generated image and calculate the loss.
+        We also use feature loss to try to replicate the image structure
+        :param extra_net: an extra discriminator for the network or none
+        :param images: the features for the network
+        :param labels: the real images
+        :return: None
         """
         # feed forward through the network
         if self.decoder_used is None:
             prediction_layer = self.feed_forward_generator(images)
         else:
+            # use already generated image to save computing time
             prediction_layer = self.decoder_used
 
         self.decoder_info.clear()
-        # calculate the loss\
+
+        # calculate the loss
         if extra_net:
             decision_dis = extra_net.forward(
                 Layer(prediction_layer, 0, net=extra_net)).layer
 
+            # we try to fool the discriminator maximize the error, min(-error)
             loss = - decision_dis.mean()
         else:
             loss = 0
 
+        # try to imitate the b&w image
         c_loss = Loss.content_loss(self, prediction_layer, labels)
 
         comb_loss = loss + c_loss
-        # backpropagate through the network
 
         self.optimizer.zero_grad()
         if extra_net:
             extra_net.optimizer.zero_grad()
+
+        # back propagate through the network
         comb_loss.backward()
 
+        # update the weights
         self.optimizer.step()
         self.decoder_used = None
+
         # save data for plots
         self.train_logger["loss"].append(comb_loss.item())
 
@@ -307,26 +320,50 @@ class Discriminator(NeuralNetwork):
         self.scheduler = IterSetpScheduler(self.optimizer, step_size=1e5)
 
     def train_model(self, images, labels, extra_net):
+        """
+        trains the model, this function takes the training data and preforms
+        the feed forward, back propagation and the optimisation process.
+        in this function we handle the discriminator training process.
+        I used hinge loss as recommended for sagans. the goal in training
+        the discriminator is classifying the images from the dataset and the
+        images from the networks
+        :param extra_net: an extra discriminator for the network or none
+        :param images: the features for the network
+        :param labels: the real images
+        :return: None
+        """
 
+        # feed forward with real images
         real_res = self.forward(Layer(labels, 0, net=self)).layer
 
-        loss_real = nn.ReLU()(1.0 - real_res).mean()
+        # hinge loss for sagans, for real images we try to minimize the loss,
+        # the loss output will be low if an image is real
+        loss_real = Loss.hinge_loss(1.0 - real_res)
 
+        # feed forward through the generator
         fake_res = extra_net.feed_forward_generator(images)
 
         extra_net.decoder_info.clear()
+        # feed forward with the generated images
         fake_res_dis = self.forward(Layer(fake_res, 0, net=self)).layer
-        loss_fake = nn.ReLU()(1.0 + fake_res_dis).mean()
 
+        # hinge loss for sagans, for fake images we try to minimize the loss,
+        # thus making a the loss high if an image is fake
+        loss_fake = Loss.hinge_loss(1.0 + fake_res_dis)
         tot_loss = loss_real + loss_fake
 
         self.optimizer.zero_grad()
         extra_net.optimizer.zero_grad()
+        # calculate the gradients
         tot_loss.backward()
 
+        # update the gradients
         self.optimizer.step()
 
+        # log the loss
         self.train_logger["loss"].append(tot_loss.item())
+
+        # save the result of the discriminator to save computing time
         extra_net.decoder_used = fake_res.detach()
 
     def forward(self, layer):

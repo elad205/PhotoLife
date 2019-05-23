@@ -11,24 +11,40 @@ class CombinedTraining(object):
 
     def super_train(self, train_loader, serial,
                     training_func, decay_lr=False):
+        """
+        this function handles the whole training scheme, it gets a function
+        pointer to run in training_func and runs it in the desired iterations
+        and epochs.
+        :param train_loader: the train dataset iterator
+        :param serial: a serial string for the plots
+        :param training_func: the function to be run every batch
+        :param decay_lr: whether or not to decay the learning rate
+        :return: None
+        """
 
+        # switch to train mode
         self.discriminator.train()
         self.generator.train()
         for epoch in range(self.args.epochs):
 
             pbar = tqdm.tqdm(total=self.args.iter_per_epoch)
             for i, (images, labels) in enumerate(train_loader):
+
+                # if the desired iteration have been satisfied stop training
                 if i * self.batch_size > self.args.iter_per_epoch:
                     break
 
+                # convert the tensors to cuda tensors
                 images = images.to(self.discriminator.device)
                 labels = labels.to(self.discriminator.device)
-                # train the discriminator
 
+                # run the training function
                 training_func(images, labels, self.args.gen_steps_per_epoch)
 
+                # update the progress bar
                 pbar.update(self.batch_size)
 
+                # decay the lr at the first 3 epochs
                 if epoch < 3 and decay_lr:
                     self.discriminator.scheduler.step()
                     self.generator.scheduler.step()

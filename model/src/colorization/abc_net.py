@@ -23,7 +23,6 @@ class NeuralNetwork(nn.Module, ABC):
         """
         initialize the network variables
         :param viz_tool: visdom object to display plots
-        :param layer_number: the number of layers in the network
         """
         super(NeuralNetwork, self).__init__()
         # using the nvidia CUDA api in order to perform calculations on a
@@ -48,8 +47,6 @@ class NeuralNetwork(nn.Module, ABC):
 
         # create the plots for debugging
         self.cost_plot = Plot("epochs", "cost", self.viz)
-
-        self.accuracy_plot = Plot("epochs", "accuracy",  self.viz)
 
         self.dict_layers = {
             "conv": LayerTypes.conv_layer,
@@ -120,11 +117,24 @@ class NeuralNetwork(nn.Module, ABC):
     def basic_switch(self, layer: tuple):
         return self.dict_layers.get(layer[0], None)(layer)
 
-    def init_weights(self, init_func=spectral_norm):
+    def init_weights(self, init_func=spectral_norm) -> list:
+        """
+        this function is the part of the weight initiation structure
+        it takes the structure of the network and applies it.
+        :param init_func: the weight normalization function
+        :return: the built network layers
+        """
         network_layers = []
         for layer_index in range(len(self.structure)):
+
+            # add the normalization function to the tuple
             self.structure[layer_index] += (init_func, )
+
+            # get the layer that fits to the layer name
             layer = self.basic_switch(self.structure[layer_index])
+
+            # for some cases the layer is a block so we temporally dismantle
+            # the block so it could be added to the module
             if type(layer) is list:
                 for sub_layer in layer:
                     network_layers.append(sub_layer)
