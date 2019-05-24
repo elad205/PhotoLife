@@ -39,6 +39,18 @@ python server.py <host> <port> <upload loc> <save loc> <checkpoint>
 [torchvision](https://pytorch.org/docs/stable/torchvision/index.html) - a  package that consists of popular datasets, model architectures, and common image transformations for computer vision.  
 
 # Exampales
+![](https://github.com/elad205/PhotoLife/blob/master/tests/test_black/test8.jpg)
+![](https://github.com/elad205/PhotoLife/blob/master/tests/images/colored/r8.jpg)  
+![](https://github.com/elad205/PhotoLife/blob/master/tests/test_black/test3.jpg)
+![](https://github.com/elad205/PhotoLife/blob/master/tests/images/colored/visdom_image%20(4).jpg)  
+![](https://github.com/elad205/PhotoLife/blob/master/tests/test_black/test27.jpg)
+![](https://github.com/elad205/PhotoLife/blob/master/tests/images/colored/visdom_image.jpg)  
+![](https://github.com/elad205/PhotoLife/blob/master/tests/test_black/test11.jpg)
+![](https://github.com/elad205/PhotoLife/blob/master/tests/images/colored/visdom_image%20(5).jpg)  
+![](https://github.com/elad205/PhotoLife/blob/master/tests/test_black/test25.jpg)
+![](https://github.com/elad205/PhotoLife/blob/master/tests/images/colored/visdom_image%20(21).jpg)  
+
+
 
 # Credits
 Thanks to @Or Gani for helping me with the amazing designs for this projects.
