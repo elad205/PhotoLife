@@ -39,8 +39,6 @@ python server.py <host> <port> <upload loc> <save loc> <checkpoint>
 [torchvision](https://pytorch.org/docs/stable/torchvision/index.html) - a  package that consists of popular datasets, model architectures, and common image transformations for computer vision.  
 
 # Exampales
-![image1](PhotoLife/tests/images/test8.jpg?raw=true)
-![image1r](PhotoLife/tests/images/r8.jpg?raw=true)
 
 # Credits
 Thanks to @Or Gani for helping me with the amazing designs for this projects.
