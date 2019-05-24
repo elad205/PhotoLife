@@ -1,7 +1,11 @@
 import argparse
 import os
 
-DES = ""
+DES = "this is a generative adversarial networks model.\n the " \
+      "program provides some utilities such as training, testing, and " \
+      "streaming input to the model\n. this program shows the learning " \
+      "process that I have taken through this project and the " \
+      "inspiration that I have taken from various articles and projects"
 
 
 def str2bool(v):
@@ -41,31 +45,51 @@ def check_path(path):
 
 
 def get_args():
-
     parser = argparse.ArgumentParser(description=DES)
-    parser.add_argument('mode', type=get_mode)
-    parser.add_argument('batch_size', type=int)
-    parser.add_argument("--test_dataset", type=str, default="")
-    parser.add_argument("--train_dataset", type=str, default="")
-    parser.add_argument('--epochs', type=int, default=10)
-    parser.add_argument('--gen_lr', '-glr', type=float, default=3e-4)
-    parser.add_argument('--dis_lr', '-dlr', type=float, default=3e-5)
-    parser.add_argument('--decay_lr', type=str2bool, default=True)
-    parser.add_argument('--visdom', '-v', type=str2bool, default=False)
-    parser.add_argument('--host', type=str, default='127.0.0.1')
-    parser.add_argument('--port', type=int, default=8097)
-    parser.add_argument('--gen_steps_per_epoch', '-s', type=int, default=2)
-    parser.add_argument('--iter_per_epoch', '-i', type=int, default=5000)
-    parser.add_argument('--checkpoint', '-c', type=str, default="")
-    parser.add_argument('--beta0', type=int, default=0)
-    parser.add_argument('--save_weights', type=str2bool, default=True)
+    parser.add_argument('mode', type=get_mode, help="the mode of the network:"
+                                                    "train, test, "
+                                                    "eval - for single or few "
+                                                    "images, standby- for "
+                                                    "running as a subprocess")
+    parser.add_argument('batch_size', type=int, help="the batch size for the "
+                                                     "generator and "
+                                                     "discrimnator")
+    parser.add_argument("--test_dataset", type=str, default="",
+                        help="a relative or absolute path to "
+                             "the training folder")
+    parser.add_argument("--train_dataset", type=str, default="",
+                        help="a relative or absolute path to "
+                             "the training folder")
+    parser.add_argument('--epochs', type=int, default=10, help="the number "
+                                                               "of epochs")
+    parser.add_argument('--gen_lr', '-glr', type=float, default=3e-4,
+                        help="the learning rate of the generator")
+    parser.add_argument('--dis_lr', '-dlr', type=float, default=3e-5,
+                        help="the learning rate of the discriminator")
+    parser.add_argument('--decay_lr', type=str2bool, default=True,
+                        help="whether or not to decay the learning rate")
+    parser.add_argument('--visdom', '-v', type=str2bool, default=False,
+                        help="whether or not to activate a visdom server")
+    parser.add_argument('--host', type=str, default='127.0.0.1',
+                        help="visdom server ip")
+    parser.add_argument('--port', type=int, default=8097,
+                        help="visdom server port")
+    parser.add_argument('--gen_steps_per_epoch', '-s', type=int, default=2,
+                        help="the amount of steps to be done on the "
+                             "generator for every discriminator step")
+    parser.add_argument('--iter_per_epoch', '-i', type=int, default=5000,
+                        help="the amount of iteration of each epoch")
+    parser.add_argument('--checkpoint', '-c', type=str, default="",
+                        help="a pre loaded checkpoint for the generator")
+    parser.add_argument('--beta0', type=int, default=0,
+                        help="beat 0 decay for ADAM optimizer")
+    parser.add_argument('--save_weights', type=str2bool, default=True,
+                        help="whether or not to save the weights "
+                             "after training")
     parser.add_argument("--eval_images", nargs="+", default=None,
-                        type=str)
-    parser.add_argument("--save_loc", type=str, default="")
+                        type=str, help="image pathes to evaluate")
+    parser.add_argument("--save_loc", type=str, default="",
+                        help="a path for saving images")
 
     args = parser.parse_args()
     return args
-
-
-
-

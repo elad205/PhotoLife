@@ -1,17 +1,8 @@
 import argparse
 import os
-import socket
 
 
 DES = ""
-
-
-def check_ip(addr):
-    try:
-        socket.inet_aton(addr)
-        # legal
-    except socket.error:
-        raise argparse.ArgumentParser(f"{addr} invalid ip")
 
 
 def check_path(path):
@@ -25,7 +16,7 @@ def check_path(path):
 def get_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--host", type=check_ip, default="127.0.0.1")
+    parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", "-p", type=int, default="8001")
     parser.add_argument("--upload_loc", "-u", type=check_path,
                         default='../frontend/static/uploads')
