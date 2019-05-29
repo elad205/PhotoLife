@@ -154,6 +154,12 @@ class NeuralNetwork(nn.Module, ABC):
         if layer.index == len(self.weights):
             return layer
         else:
-            new_layer = self.create_activated_layer(layer)
+            try:
+                new_layer = self.create_activated_layer(layer)
+            # check for invalid network structure
+            except RuntimeError:
+                print("invalid network "
+                      "structre, please check your struct and try again")
+                exit(-1)
             layer_1 = self.forward_model(new_layer)
             return layer_1
