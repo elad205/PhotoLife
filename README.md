@@ -53,7 +53,7 @@ python server.py <host> <port> <upload loc> <save loc> <checkpoint>
 
 
 # Credits
-Thanks to @Or Gani for helping me with the amazing designs for this projects.
+Thanks to [@Gangana3](https://github.com/Gangana3) for helping me with the amazing designs for this projects.
 
 I also want to thank my mentor Shai who helped me through the whole project.
 
