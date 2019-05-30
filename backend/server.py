@@ -49,7 +49,7 @@ class PageHandler(object):
     APP = Flask(__name__, template_folder='../frontend/templates',
                 static_folder='../frontend/static')
 
-    TALISMAN = Talisman(APP, content_security_policy={})
+    Talisman(APP, content_security_policy={})
 
     def __init__(self, args):
         super(PageHandler, self).__init__()
