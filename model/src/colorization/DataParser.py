@@ -96,13 +96,14 @@ class DataParser:
         for path in paths:
             try:
                 arr.append(cv2.imread(path, cv2.IMREAD_GRAYSCALE))
+                arr[-1] = cv2.resize(arr[-1], (256, 256)).reshape(
+                    (1, 256, 256))
+
             except cv2.error:
                 print(
                     "an error accrued while opening the images,"
                     " please check the validity of the images", file=sys.stderr)
                 exit(-1)
-
-            arr[-1] = cv2.resize(arr[-1], (256, 256)).reshape((1, 256, 256))
 
         arr = numpy.asarray(arr).astype('float32') / 255.0
         return arr

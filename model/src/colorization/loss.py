@@ -51,4 +51,4 @@ class Loss(object):
 
     @staticmethod
     def hinge_loss(delta):
-        return nn.ReLU(delta).mean()
+        return nn.ReLU()(delta).mean()
