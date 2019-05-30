@@ -8,7 +8,9 @@ import imghdr
 import time
 import cv2
 import uuid
+import ssl
 from args import get_args
+from flask_talisman import Talisman
 
 
 class Singleton(type):
@@ -16,7 +18,7 @@ class Singleton(type):
 
     def __call__(cls, *args, **kwargs):
         if cls not in cls._instances:
-            cls._instances[cls] = super(Singleton, cls).\
+            cls._instances[cls] = super(Singleton, cls). \
                 __call__(*args, **kwargs)
         return cls._instances[cls]
 
@@ -33,6 +35,7 @@ class Generator(object, metaclass=Singleton):
                                           stdin=subprocess.PIPE,
                                           stderr=subprocess.PIPE)
 
+
 # create one instance of the generator
 
 
@@ -40,17 +43,20 @@ gen = None
 
 
 class PageHandler(object):
-
     # the only allowed types to be handled on host
     ALLOWED_TYPES = {'jpg', 'png', 'jpeg'}
 
     APP = Flask(__name__, template_folder='../frontend/templates',
                 static_folder='../frontend/static')
 
+    TALISMAN = Talisman(APP)
+
     def __init__(self, args):
         super(PageHandler, self).__init__()
         self.host = args.host
         self.port = args.port
+        self.cert = args.certificate
+        self.key = args.key
 
         # set the upload folder
         PageHandler.APP.config['UPLOAD_FOLDER'] = args.upload_loc
@@ -128,7 +134,7 @@ class PageHandler(object):
                     os.write(gen.generator.stdin.fileno(),
                              PageHandler.pad(file_path))
                     # read back the result
-                    res = os.read(gen.generator.stderr.fileno(), 4096).\
+                    res = os.read(gen.generator.stderr.fileno(), 4096). \
                         decode()
                     timeout = time.time() + 10
                     # if an error has accrued
@@ -165,7 +171,10 @@ class PageHandler(object):
 
     def run(self):
         # runs the website
-        self.APP.run(host=self.host, port=self.port, threaded=True)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+        context.load_cert_chain(self.cert, self.key)
+        self.APP.run(host=self.host, port=self.port, threaded=True,
+                     ssl_context=context)
 
 
 def main(args):

@@ -25,5 +25,13 @@ def get_args():
     parser.add_argument("--checkpoint", "-c", type=check_path,
                         default="../pre trained/gen.ckpt")
 
+    parser.add_argument("--certificate", "-r", type=check_path,
+                        default=(r"C:\Users\eladc\Documents\proj"
+                                 r"\FinalProject_ML\backend\crt"
+                                 r"\photolife-ml_me.crt"))
+
+    parser.add_argument("--key", "-k", type=check_path,
+                        default="c:\\private_key.key")
+
     args = parser.parse_args()
     return args
