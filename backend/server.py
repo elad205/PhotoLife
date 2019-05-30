@@ -49,7 +49,7 @@ class PageHandler(object):
     APP = Flask(__name__, template_folder='../frontend/templates',
                 static_folder='../frontend/static')
 
-    TALISMAN = Talisman(APP)
+    TALISMAN = Talisman(APP, content_security_policy={})
 
     def __init__(self, args):
         super(PageHandler, self).__init__()
@@ -60,6 +60,11 @@ class PageHandler(object):
 
         # set the upload folder
         PageHandler.APP.config['UPLOAD_FOLDER'] = args.upload_loc
+
+    @staticmethod
+    @APP.route("/info")
+    def info_page():
+        return flask.render_template('info.html')
 
     @staticmethod
     @APP.route("/")
