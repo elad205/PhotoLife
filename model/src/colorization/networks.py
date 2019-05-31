@@ -199,10 +199,11 @@ class GeneratorDecoder(NeuralNetwork):
             # display the images
             if display_data:
                 disp = labels
-                if viz_win_images is None:
+                if viz_win_images is None and self.viz is not None:
                     viz_win_images = self.viz.images(labels)
                 else:
-                    self.viz.images(disp, win=viz_win_images)
+                    if self.viz is not None:
+                        self.viz.images(disp, win=viz_win_images)
 
             # parse the images and labels
             # feed forward through the network
@@ -210,12 +211,13 @@ class GeneratorDecoder(NeuralNetwork):
             prediction_layer = self.feed_forward_generator(images)
             if display_data:
                 final = prediction_layer
-                if viz_win_res is None:
+                if viz_win_res is None and self.viz is not None:
                     viz_win_res = self.viz.images(
                         final.cpu().numpy())
                 else:
-                    self.viz.images(
-                        final.cpu().numpy(), win=viz_win_res)
+                    if self.viz is not None:
+                        self.viz.images(
+                            final.cpu().numpy(), win=viz_win_res)
             labels = labels.to(self.device)
             self.test_logger["loss"].append(Loss.mse_loss(
                 prediction_layer, labels).item())

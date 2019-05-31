@@ -84,6 +84,7 @@ class DataParser:
 
     @staticmethod
     def rgb_parse(image):
+        image = cv2.resize(image, (256, 256))
         rgb_image = (image / 255.0).astype('float32')
         gray_image = cv2.cvtColor(image.astype('float32'),
                                   cv2.COLOR_RGB2GRAY) / 255.0
