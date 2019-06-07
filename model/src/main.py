@@ -63,9 +63,11 @@ def main(args):
             exit(-1)
 
     if args.mode == "standby":
+        # wait for incoming files in the pipe and eval them
         queue_ = queue.Queue()
         input_files = []
 
+        # constantly read the stdin
         lisnter = threading.Thread(target=read_stdin, args=(queue_, ))
         lisnter.daemon = True
         lisnter.start()
@@ -93,7 +95,7 @@ def main(args):
         if args.eval_images is None:
             print("cant eval model without images", file=sys.stderr)
             exit(-1)
-        gen.eval_model(args.eval_images)
+        gen.eval_model(args.eval_images, args.save_loc)
 
     else:
         test_loader = DataParser.load_places_test(

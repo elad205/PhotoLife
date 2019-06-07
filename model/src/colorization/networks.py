@@ -23,12 +23,13 @@ class Vgg16(nn.Module):
     @no_grad
     def __init__(self, device):
         super(Vgg16, self).__init__()
-
         self.device = device
         self.vgg_pre_trained = torchvision.models.vgg16(
             pretrained=True).features.to(self.device)
         self.blocks = []
         self.vgg_pre_trained.eval()
+
+        # extract the desired blocks from the entire network
         for i in range(4):
             self.blocks.append(nn.Sequential())
 
@@ -181,6 +182,12 @@ class GeneratorDecoder(NeuralNetwork):
                      layer_number=layer.index + 1, net=layer.net)
 
     def concat_unet(self, layer):
+        """
+        concat the current tensor of the network with the matching tesnor of
+        the resent encoder
+        :param layer: the current layer to be concat
+        :return:
+        """
         decoder_functions = self.decode_wights[self.decode_index]
         encoder_info = self.decoder_info[layer.layer.size()]
         layer.layer = torch.cat((
@@ -287,7 +294,14 @@ class GeneratorDecoder(NeuralNetwork):
 
     @no_grad
     def eval_model(self, imgs, save_img=""):
+        """
+        this function just feeds forward through the model and saves the output
+        :param imgs: the path ot the images to be processed
+        :param save_img: the location to save them on
+        :return:
+        """
         self.eval()
+        # convert the images to tensors
         arrays_images = DataParser.load_images(imgs)
         im_gray = torch.from_numpy(arrays_images).to(self.device)
         colored = self.feed_forward_generator(im_gray)
